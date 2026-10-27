@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pl">
 <head>
@@ -88,9 +89,7 @@
         ];
 
         function parseCSV(text) {
-            const lines = text.trim().split(/\r?\n/);
-
-            return lines.map(line =>
+            return text.trim().split(/\r?\n/).map(line =>
                 line.split(";").map(value => value.trim())
             );
         }
@@ -102,7 +101,9 @@
                 const response = await fetch(csvFile);
 
                 if (!response.ok) {
-                    throw new Error("Nie udało się pobrać pliku " + csvFile);
+                    throw new Error(
+                        "Nie udało się pobrać pliku " + csvFile
+                    );
                 }
 
                 const text = await response.text();
@@ -133,6 +134,7 @@
                 const head = document.getElementById("table-head");
                 const body = document.getElementById("table-body");
 
+                // Tworzenie nagłówków tabeli
                 const headerRow = document.createElement("tr");
 
                 columns.forEach(column => {
@@ -142,34 +144,49 @@
                 });
 
                 head.replaceChildren(headerRow);
-rows.splice(1, rows.length - 1).sort((a, b) => {
-    const sumaA = Number(a[indexes[2]]) || 0;
-    const sumaB = Number(b[indexes[2]]) || 0;
 
-    if (sumaA !== sumaB) {
-        return sumaB - sumaA;
-    }
+                // Sortowanie: SUMA malejąco, Róż. czasu rosnąco
+                const sortedRows = rows.slice(1).sort((a, b) => {
+                    const sumaA = Number(a[indexes[2]]);
+                    const sumaB = Number(b[indexes[2]]);
 
-    const czasA = Number(a[indexes[22]]) || 0;
-    const czasB = Number(b[indexes[22]]) || 0;
+                    if (sumaA !== sumaB) {
+                        return sumaB - sumaA;
+                    }
 
-    return czasA - czasB;
-}).forEach(row => {
-               rows.slice(1)
-    .sort((a, b) => {
-        const sumaA = Number(a[indexes[2]]);
-        const sumaB = Number(b[indexes[2]]);
+                    const czasA = Number(a[indexes[22]]);
+                    const czasB = Number(b[indexes[22]]);
 
-        if (sumaA !== sumaB) {
-            return sumaB - sumaA;
+                    return czasA - czasB;
+                });
+
+                // Wyświetlanie danych
+                const fragment = document.createDocumentFragment();
+
+                sortedRows.forEach(row => {
+                    const tr = document.createElement("tr");
+
+                    indexes.forEach(index => {
+                        const td = document.createElement("td");
+                        td.textContent = row[index] ?? "";
+                        tr.appendChild(td);
+                    });
+
+                    fragment.appendChild(tr);
+                });
+
+                body.replaceChildren(fragment);
+
+                status.textContent =
+                    "Liczba typerów: " + sortedRows.length;
+                status.className = "";
+
+            } catch (error) {
+                status.textContent = error.message;
+                status.className = "error";
+                console.error(error);
+            }
         }
-
-        const czasA = Number(a[indexes[22]]);
-        const czasB = Number(b[indexes[22]]);
-
-        return czasA - czasB;
-    })
-    .forEach(row => {
 
         loadTable();
     </script>
