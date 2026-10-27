@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Statystyki typera</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f4f4f4;
+            color: #222;
+        }
+
+        h1 {
+            margin-bottom: 20px;
+        }
+
+        .table-container {
+            overflow-x: auto;
+            background: white;
+            border-radius: 6px;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            white-space: nowrap;
+            font-size: 14px;
+        }
+
+        th, td {
+            padding: 9px 12px;
+            border: 1px solid #ddd;
+            text-align: center;
+        }
+
+        th {
+            background: #222;
+            color: white;
+            position: sticky;
+            top: 0;
+        }
+
+        td:first-child, th:first-child {
+            text-align: left;
+        }
+
+        tbody tr:nth-child(even) {
+            background: #f2f2f2;
+        }
+
+        tbody tr:hover {
+            background: #e0eaff;
+        }
+
+        .error {
+            color: #b00020;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Statystyki typera</h1>
+
+    <p id="status">Wczytywanie danych...</p>
+
+    <div class="table-container">
+        <table>
+            <thead id="table-head"></thead>
+            <tbody id="table-body"></tbody>
+        </table>
+    </div>
+
+    <script>
+        const csvFile = "dane.csv";
+
+        const columns = [
+            "Nick", "Team", "SUMA",
+            "QP1", "QP2", "QP3",
+            "Q1", "Q2",
+            "par1", "par2", "par3", "par4", "par5",
+            "w1", "w2", "w3", "w4", "w5",
+            "FN1", "FN2", "FN3",
+            "bonusy", "Róż. czasu", "PENALTY"
+        ];
+
+        function parseCSV(text) {
+            const lines = text.trim().split(/\r?\n/);
+
+            return lines.map(line =>
+                line.split(";").map(value => value.trim())
+            );
+        }
+
+        async function loadTable() {
+            const status = document.getElementById("status");
+
+            try {
+                const response = await fetch(csvFile);
+
+                if (!response.ok) {
+                    throw new Error("Nie udało się pobrać pliku " + csvFile);
+                }
+
+                const text = await response.text();
+                const rows = parseCSV(text);
+
+                if (rows.length < 2) {
+                    throw new Error("Plik CSV nie zawiera danych.");
+                }
+
+                const headers = rows[0].map(header =>
+                    header.replace(/^\uFEFF/, "")
+                );
+
+                const indexes = columns.map(column =>
+                    headers.indexOf(column)
+                );
+
+                const missing = columns.filter((column, i) =>
+                    indexes[i] === -1
+                );
+
+                if (missing.length > 0) {
+                    throw new Error(
+                        "Brak wymaganych kolumn: " + missing.join(", ")
+                    );
+                }
+
+                const head = document.getElementById("table-head");
+                const body = document.getElementById("table-body");
+
+                const headerRow = document.createElement("tr");
+
+                columns.forEach(column => {
+                    const th = document.createElement("th");
+                    th.textContent = column;
+                    headerRow.appendChild(th);
+                });
+
+                head.replaceChildren(headerRow);
+
+                rows.slice(1).forEach(row => {
+                    const tr = document.createElement("tr");
+
+                    indexes.forEach(index => {
+                        const td = document.createElement("td");
+                        td.textContent = row[index] ?? "";
+                        tr.appendChild(td);
+                    });
+
+                    body.appendChild(tr);
+                });
+
+                status.textContent =
+                    "Liczba typerów: " + (rows.length - 1);
+
+            } catch (error) {
+                status.textContent = error.message;
+                status.className = "error";
+            }
+        }
+
+        loadTable();
+    </script>
+
+</body>
+</html>
