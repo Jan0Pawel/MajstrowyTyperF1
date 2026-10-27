@@ -142,27 +142,34 @@
                 });
 
                 head.replaceChildren(headerRow);
+rows.splice(1, rows.length - 1).sort((a, b) => {
+    const sumaA = Number(a[indexes[2]]) || 0;
+    const sumaB = Number(b[indexes[2]]) || 0;
 
-                rows.slice(1).forEach(row => {
-                    const tr = document.createElement("tr");
+    if (sumaA !== sumaB) {
+        return sumaB - sumaA;
+    }
 
-                    indexes.forEach(index => {
-                        const td = document.createElement("td");
-                        td.textContent = row[index] ?? "";
-                        tr.appendChild(td);
-                    });
+    const czasA = Number(a[indexes[22]]) || 0;
+    const czasB = Number(b[indexes[22]]) || 0;
 
-                    body.appendChild(tr);
-                });
+    return czasA - czasB;
+}).forEach(row => {
+               rows.slice(1)
+    .sort((a, b) => {
+        const sumaA = Number(a[indexes[2]]);
+        const sumaB = Number(b[indexes[2]]);
 
-                status.textContent =
-                    "Liczba typerów: " + (rows.length - 1);
-
-            } catch (error) {
-                status.textContent = error.message;
-                status.className = "error";
-            }
+        if (sumaA !== sumaB) {
+            return sumaB - sumaA;
         }
+
+        const czasA = Number(a[indexes[22]]);
+        const czasB = Number(b[indexes[22]]);
+
+        return czasA - czasB;
+    })
+    .forEach(row => {
 
         loadTable();
     </script>
