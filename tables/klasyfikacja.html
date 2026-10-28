@@ -1,0 +1,176 @@
+
+<section id="klasyfikacja">
+    <style>
+        #klasyfikacja .table-container {
+            overflow-x: auto;
+            background: white;
+            border-radius: 6px;
+        }
+
+        #klasyfikacja table {
+            border-collapse: collapse;
+            width: 100%;
+            white-space: nowrap;
+            font-size: 14px;
+        }
+
+        #klasyfikacja th,
+        #klasyfikacja td {
+            padding: 9px 12px;
+            border: 1px solid #ddd;
+            text-align: center;
+        }
+
+        #klasyfikacja th {
+            background: #222;
+            color: white;
+            position: sticky;
+            top: 0;
+        }
+
+        #klasyfikacja td:first-child,
+        #klasyfikacja th:first-child {
+            text-align: left;
+        }
+
+        #klasyfikacja tbody tr:nth-child(even) {
+            background: #f2f2f2;
+        }
+
+        #klasyfikacja tbody tr:hover {
+            background: #e0eaff;
+        }
+
+        #klasyfikacja .error {
+            color: #b00020;
+            font-weight: bold;
+        }
+    </style>
+
+    <h2>Klasyfikacja typera</h2>
+
+    <p id="status">Wczytywanie danych...</p>
+
+    <div class="table-container">
+        <table>
+            <thead id="table-head"></thead>
+            <tbody id="table-body"></tbody>
+        </table>
+    </div>
+
+    <script>
+        (function () {
+            const csvFile = "dane.csv";
+
+            const columns = [
+                "Nick", "Team", "SUMA",
+                "QP1", "QP2", "QP3",
+                "Q1", "Q2",
+                "par1", "par2", "par3", "par4", "par5",
+                "w1", "w2", "w3", "w4", "w5",
+                "FN1", "FN2", "FN3",
+                "bonusy", "Róż. czasu", "PENALTY"
+            ];
+
+            const section = document.getElementById("klasyfikacja");
+            const status = section.querySelector("#status");
+            const head = section.querySelector("#table-head");
+            const body = section.querySelector("#table-body");
+
+            function parseCSV(text) {
+                return text.trim().split(/\r?\n/).map(line =>
+                    line.split(";").map(value => value.trim())
+                );
+            }
+
+            async function loadTable() {
+                try {
+                    const response = await fetch(csvFile);
+
+                    if (!response.ok) {
+                        throw new Error(
+                            "Nie udało się pobrać pliku " + csvFile
+                        );
+                    }
+
+                    const text = await response.text();
+                    const rows = parseCSV(text);
+
+                    if (rows.length < 2) {
+                        throw new Error("Plik CSV nie zawiera danych.");
+                    }
+
+                    const headers = rows[0].map(header =>
+                        header.replace(/^\uFEFF/, "")
+                    );
+
+                    const indexes = columns.map(column =>
+                        headers.indexOf(column)
+                    );
+
+                    const missing = columns.filter((column, i) =>
+                        indexes[i] === -1
+                    );
+
+                    if (missing.length > 0) {
+                        throw new Error(
+                            "Brak wymaganych kolumn: " + missing.join(", ")
+                        );
+                    }
+
+                    const headerRow = document.createElement("tr");
+
+                    columns.forEach(column => {
+                        const th = document.createElement("th");
+                        th.textContent = column;
+                        headerRow.appendChild(th);
+                    });
+
+                    head.replaceChildren(headerRow);
+
+                    // SUMA malejąco, Róż. czasu rosnąco
+                    const sortedRows = rows.slice(1).sort((a, b) => {
+                        const sumaA = Number(a[indexes[2]]);
+                        const sumaB = Number(b[indexes[2]]);
+
+                        if (sumaA !== sumaB) {
+                            return sumaB - sumaA;
+                        }
+
+                        const czasA = Number(a[indexes[22]]);
+                        const czasB = Number(b[indexes[22]]);
+
+                        return czasA - czasB;
+                    });
+
+                    const fragment = document.createDocumentFragment();
+
+                    sortedRows.forEach(row => {
+                        const tr = document.createElement("tr");
+
+                        indexes.forEach(index => {
+                            const td = document.createElement("td");
+                            td.textContent = row[index] ?? "";
+                            tr.appendChild(td);
+                        });
+
+                        fragment.appendChild(tr);
+                    });
+
+                    body.replaceChildren(fragment);
+
+                    status.textContent =
+                        "Liczba typerów: " + sortedRows.length;
+                    status.className = "";
+
+                } catch (error) {
+                    status.textContent = error.message;
+                    status.className = "error";
+                    console.error(error);
+                }
+            }
+
+            loadTable();
+        })();
+    </script>
+</section>
