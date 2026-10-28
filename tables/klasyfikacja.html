@@ -28,8 +28,8 @@
             top: 0;
         }
 
-        #klasyfikacja td:first-child,
-        #klasyfikacja th:first-child {
+        #klasyfikacja td:nth-child(3),
+        #klasyfikacja th:nth-child(3) {
             text-align: left;
         }
 
@@ -61,6 +61,7 @@
     <script>
         (function () {
             const csvFile = "dane.csv";
+            const scoringFile = "punktacja.csv";
 
             const columns = [
                 "Nick", "Team", "SUMA",
@@ -78,28 +79,56 @@
             const body = section.querySelector("#table-body");
 
             function parseCSV(text) {
-                return text.trim().split(/\r?\n/).map(line =>
-                    line.split(";").map(value => value.trim())
-                );
+                return text
+                    .replace(/^\uFEFF/, "")
+                    .trim()
+                    .split(/\r?\n/)
+                    .map(line =>
+                        line.split(";").map(value => value.trim())
+                    );
             }
 
             async function loadTable() {
                 try {
-                    const response = await fetch(csvFile);
+                    const [dataResponse, scoringResponse] =
+                        await Promise.all([
+                            fetch(csvFile),
+                            fetch(scoringFile)
+                        ]);
 
-                    if (!response.ok) {
+                    if (!dataResponse.ok) {
                         throw new Error(
                             "Nie udało się pobrać pliku " + csvFile
                         );
                     }
 
-                    const text = await response.text();
-                    const rows = parseCSV(text);
-
-                    if (rows.length < 2) {
-                        throw new Error("Plik CSV nie zawiera danych.");
+                    if (!scoringResponse.ok) {
+                        throw new Error(
+                            "Nie udało się pobrać pliku " + scoringFile
+                        );
                     }
 
+                    const [dataText, scoringText] = await Promise.all([
+                        dataResponse.text(),
+                        scoringResponse.text()
+                    ]);
+
+                    const rows = parseCSV(dataText);
+                    const scoringRows = parseCSV(scoringText);
+
+                    if (rows.length < 2) {
+                        throw new Error(
+                            "Plik CSV nie zawiera danych."
+                        );
+                    }
+
+                    if (scoringRows.length < 2) {
+                        throw new Error(
+                            "Plik punktacji nie zawiera danych."
+                        );
+                    }
+
+                    // Odczyt nagłówków danych
                     const headers = rows[0].map(header =>
                         header.replace(/^\uFEFF/, "")
                     );
@@ -114,21 +143,44 @@
 
                     if (missing.length > 0) {
                         throw new Error(
-                            "Brak wymaganych kolumn: " + missing.join(", ")
+                            "Brak wymaganych kolumn: " +
+                            missing.join(", ")
                         );
                     }
 
-                    const headerRow = document.createElement("tr");
+                    // Odczyt tabeli punktacji
+                    const scoringHeaders = scoringRows[0].map(header =>
+                        header.replace(/^\uFEFF/, "")
+                    );
 
-                    columns.forEach(column => {
-                        const th = document.createElement("th");
-                        th.textContent = column;
-                        headerRow.appendChild(th);
+                    const positionIndex =
+                        scoringHeaders.indexOf("Pozycja");
+                    const pointsIndex =
+                        scoringHeaders.indexOf("Punkty");
+
+                    if (positionIndex === -1 || pointsIndex === -1) {
+                        throw new Error(
+                            "Plik punktacji musi zawierać kolumny " +
+                            "Pozycja i Punkty."
+                        );
+                    }
+
+                    const scoring = new Map();
+
+                    scoringRows.slice(1).forEach(row => {
+                        const position = Number(row[positionIndex]);
+                        const points = Number(row[pointsIndex]);
+
+                        if (
+                            Number.isInteger(position) &&
+                            position > 0 &&
+                            Number.isFinite(points)
+                        ) {
+                            scoring.set(position, points);
+                        }
                     });
 
-                    head.replaceChildren(headerRow);
-
-                    // SUMA malejąco, Róż. czasu rosnąco
+                    // Sortowanie: SUMA malejąco, Róż. czasu rosnąco
                     const sortedRows = rows.slice(1).sort((a, b) => {
                         const sumaA = Number(a[indexes[2]]);
                         const sumaB = Number(b[indexes[2]]);
@@ -143,14 +195,62 @@
                         return czasA - czasB;
                     });
 
+                    // Przy identycznej sumie i różnicy czasu:
+                    // to samo miejsce oraz te same punkty.
+                    const rankedRows = sortedRows.map((row, i) => {
+                        let position = i + 1;
+
+                        if (i > 0) {
+                            const previous = sortedRows[i - 1];
+
+                            const sameSum =
+                                Number(row[indexes[2]]) ===
+                                Number(previous[indexes[2]]);
+
+                            const sameTime =
+                                Number(row[indexes[22]]) ===
+                                Number(previous[indexes[22]]);
+
+                            if (sameSum && sameTime) {
+                                position = i;
+                            }
+                        }
+
+                        return {
+                            row,
+                            position,
+                            points: scoring.get(position) ?? 0
+                        };
+                    });
+
+                    // Nagłówki tabeli
+                    const headerRow = document.createElement("tr");
+
+                    ["Pozycja", "Punkty", ...columns].forEach(column => {
+                        const th = document.createElement("th");
+                        th.textContent = column;
+                        headerRow.appendChild(th);
+                    });
+
+                    head.replaceChildren(headerRow);
+
+                    // Wyświetlanie danych
                     const fragment = document.createDocumentFragment();
 
-                    sortedRows.forEach(row => {
+                    rankedRows.forEach(item => {
                         const tr = document.createElement("tr");
+
+                        const positionCell = document.createElement("td");
+                        positionCell.textContent = item.position;
+                        tr.appendChild(positionCell);
+
+                        const pointsCell = document.createElement("td");
+                        pointsCell.textContent = item.points;
+                        tr.appendChild(pointsCell);
 
                         indexes.forEach(index => {
                             const td = document.createElement("td");
-                            td.textContent = row[index] ?? "";
+                            td.textContent = item.row[index] ?? "";
                             tr.appendChild(td);
                         });
 
@@ -160,7 +260,7 @@
                     body.replaceChildren(fragment);
 
                     status.textContent =
-                        "Liczba typerów: " + sortedRows.length;
+                        "Liczba typerów: " + rankedRows.length;
                     status.className = "";
 
                 } catch (error) {
