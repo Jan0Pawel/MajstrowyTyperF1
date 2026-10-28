@@ -17,178 +17,85 @@
         h1 {
             margin-bottom: 20px;
         }
-
-        .table-container {
-            overflow-x: auto;
-            background: white;
-            border-radius: 6px;
-        }
-
-        table {
-            border-collapse: collapse;
-            width: 100%;
-            white-space: nowrap;
-            font-size: 14px;
-        }
-
-        th, td {
-            padding: 9px 12px;
-            border: 1px solid #ddd;
-            text-align: center;
-        }
-
-        th {
-            background: #222;
-            color: white;
-            position: sticky;
-            top: 0;
-        }
-
-        td:first-child, th:first-child {
-            text-align: left;
-        }
-
-        tbody tr:nth-child(even) {
-            background: #f2f2f2;
-        }
-
-        tbody tr:hover {
-            background: #e0eaff;
-        }
-
-        .error {
-            color: #b00020;
-            font-weight: bold;
-        }
     </style>
 </head>
 <body>
 
     <h1>Statystyki typera</h1>
 
-    <p id="status">Wczytywanie danych...</p>
-
-    <div class="table-container">
-        <table>
-            <thead id="table-head"></thead>
-            <tbody id="table-body"></tbody>
-        </table>
-    </div>
+    <main id="tables-container">
+        <p>Wczytywanie tabeli...</p>
+    </main>
 
     <script>
-        const csvFile = "dane.csv";
+        async function loadTemplate(url, container) {
+            const response = await fetch(url);
 
-        const columns = [
-            "Nick", "Team", "SUMA",
-            "QP1", "QP2", "QP3",
-            "Q1", "Q2",
-            "par1", "par2", "par3", "par4", "par5",
-            "w1", "w2", "w3", "w4", "w5",
-            "FN1", "FN2", "FN3",
-            "bonusy", "Róż. czasu", "PENALTY"
-        ];
+            if (!response.ok) {
+                throw new Error(
+                    "Nie udało się wczytać pliku: " + url
+                );
+            }
 
-        function parseCSV(text) {
-            return text.trim().split(/\r?\n/).map(line =>
-                line.split(";").map(value => value.trim())
+            const html = await response.text();
+
+            const template = document.createElement("template");
+            template.innerHTML = html;
+
+            const scripts = Array.from(
+                template.content.querySelectorAll("script")
             );
+
+            const scriptContents = scripts.map(script => ({
+                src: script.getAttribute("src"),
+                code: script.textContent,
+                type: script.getAttribute("type")
+            }));
+
+            scripts.forEach(script => script.remove());
+
+            container.replaceChildren(template.content);
+
+            for (const scriptInfo of scriptContents) {
+                const script = document.createElement("script");
+
+                if (scriptInfo.type) {
+                    script.type = scriptInfo.type;
+                }
+
+                if (scriptInfo.src) {
+                    script.src = scriptInfo.src;
+                    document.body.appendChild(script);
+
+                    await new Promise((resolve, reject) => {
+                        script.onload = resolve;
+                        script.onerror = () => reject(
+                            new Error("Nie udało się uruchomić skryptu.")
+                        );
+                    });
+                } else {
+                    script.textContent = scriptInfo.code;
+                    document.body.appendChild(script);
+                    script.remove();
+                }
+            }
         }
 
-        async function loadTable() {
-            const status = document.getElementById("status");
+        async function initPage() {
+            const container = document.getElementById("tables-container");
 
             try {
-                const response = await fetch(csvFile);
-
-                if (!response.ok) {
-                    throw new Error(
-                        "Nie udało się pobrać pliku " + csvFile
-                    );
-                }
-
-                const text = await response.text();
-                const rows = parseCSV(text);
-
-                if (rows.length < 2) {
-                    throw new Error("Plik CSV nie zawiera danych.");
-                }
-
-                const headers = rows[0].map(header =>
-                    header.replace(/^\uFEFF/, "")
+                await loadTemplate(
+                    "tables/klasyfikacja.html",
+                    container
                 );
-
-                const indexes = columns.map(column =>
-                    headers.indexOf(column)
-                );
-
-                const missing = columns.filter((column, i) =>
-                    indexes[i] === -1
-                );
-
-                if (missing.length > 0) {
-                    throw new Error(
-                        "Brak wymaganych kolumn: " + missing.join(", ")
-                    );
-                }
-
-                const head = document.getElementById("table-head");
-                const body = document.getElementById("table-body");
-
-                // Tworzenie nagłówków tabeli
-                const headerRow = document.createElement("tr");
-
-                columns.forEach(column => {
-                    const th = document.createElement("th");
-                    th.textContent = column;
-                    headerRow.appendChild(th);
-                });
-
-                head.replaceChildren(headerRow);
-
-                // Sortowanie: SUMA malejąco, Róż. czasu rosnąco
-                const sortedRows = rows.slice(1).sort((a, b) => {
-                    const sumaA = Number(a[indexes[2]]);
-                    const sumaB = Number(b[indexes[2]]);
-
-                    if (sumaA !== sumaB) {
-                        return sumaB - sumaA;
-                    }
-
-                    const czasA = Number(a[indexes[22]]);
-                    const czasB = Number(b[indexes[22]]);
-
-                    return czasA - czasB;
-                });
-
-                // Wyświetlanie danych
-                const fragment = document.createDocumentFragment();
-
-                sortedRows.forEach(row => {
-                    const tr = document.createElement("tr");
-
-                    indexes.forEach(index => {
-                        const td = document.createElement("td");
-                        td.textContent = row[index] ?? "";
-                        tr.appendChild(td);
-                    });
-
-                    fragment.appendChild(tr);
-                });
-
-                body.replaceChildren(fragment);
-
-                status.textContent =
-                    "Liczba typerów: " + sortedRows.length;
-                status.className = "";
-
             } catch (error) {
-                status.textContent = error.message;
-                status.className = "error";
+                container.textContent = error.message;
                 console.error(error);
             }
         }
 
-        loadTable();
+        initPage();
     </script>
 
 </body>
