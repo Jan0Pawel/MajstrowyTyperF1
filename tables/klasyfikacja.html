@@ -1,13 +1,17 @@
-<div class="controls">
-  <label for="data-selector">Wybierz typera:</label>
-  <select id="data-selector">
-    <option value="2026/typy/dane.csv">Typer 1</option>
-    <option value="2026/typy/dane2.csv">Typer 2</option>
-  </select>
-</div>
-
 <section id="klasyfikacja">
     <style>
+        #klasyfikacja .controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        #klasyfikacja #data-selector {
+            padding: 6px 10px;
+            font: inherit;
+        }
+
         #klasyfikacja .table-container {
             overflow-x: auto;
             background: white;
@@ -56,6 +60,14 @@
 
     <h2>Klasyfikacja typera</h2>
 
+    <div class="controls">
+        <label for="data-selector">Wybierz typera:</label>
+        <select id="data-selector">
+            <option value="2026/typy/dane.csv">Typer 1</option>
+            <option value="2026/typy/dane2.csv">Typer 2</option>
+        </select>
+    </div>
+
     <p id="status">Wczytywanie danych...</p>
 
     <div class="table-container">
@@ -67,8 +79,8 @@
 
     <script>
         (function () {
-            const csvFile = "dane.csv";
             const scoringFile = "punktacja.csv";
+            const dataSelector = document.getElementById("data-selector");
 
             const columns = [
                 "Nick", "Team", "SUMA",
@@ -96,6 +108,11 @@
             }
 
             async function loadTable() {
+                const csvFile = dataSelector.value;
+
+                status.textContent = "Wczytywanie danych...";
+                status.className = "";
+
                 try {
                     const [dataResponse, scoringResponse] =
                         await Promise.all([
@@ -276,6 +293,8 @@
                     console.error(error);
                 }
             }
+
+            dataSelector.addEventListener("change", loadTable);
 
             loadTable();
         })();
