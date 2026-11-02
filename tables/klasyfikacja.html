@@ -1,0 +1,168 @@
+<section id="klasyfikacja">
+    <style>
+        #klasyfikacja .controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        #klasyfikacja #data-selector {
+            padding: 6px 10px;
+            font: inherit;
+        }
+
+        #klasyfikacja .error {
+            color: #b00020;
+            font-weight: bold;
+        }
+    </style>
+
+    <h2>Klasyfikacja typera</h2>
+
+    <div class="controls">
+        <label for="data-selector">Wybierz typera:</label>
+        <select id="data-selector">
+            <option value="2026/typy/dane.csv"></option>
+            <option value="2026/typy/dane2.csv"></option>
+        </select>
+    </div>
+
+    <p id="dispatcher-status">Wczytywanie danych...</p>
+
+    <div id="classification-content"></div>
+
+    <script>
+        (function () {
+            const section = document.getElementById("klasyfikacja");
+            const dataSelector = section.querySelector("#data-selector");
+            const status = section.querySelector("#dispatcher-status");
+            const content = section.querySelector("#classification-content");
+
+            // Pobieranie nazwy typera z nazwy pliku
+            function getTyperName(filePath) {
+                return filePath
+                    .split("/")
+                    .pop()
+                    .replace(/\.csv$/i, "");
+            }
+
+            // Automatyczne uzupełnianie nazw typerów
+            Array.from(dataSelector.options).forEach(option => {
+                option.textContent = getTyperName(option.value);
+            });
+
+            // Rozpoznawanie formatu i ładowanie klasyfikacji
+            async function loadClassification() {
+                const csvFile = dataSelector.value;
+
+                status.textContent = "Rozpoznawanie formatu typera...";
+                status.className = "";
+
+                try {
+                    // Pobranie pliku CSV
+                    const response = await fetch(csvFile);
+
+                    if (!response.ok) {
+                        throw new Error(
+                            "Nie udało się pobrać pliku " + csvFile
+                        );
+                    }
+
+                    const csvText = await response.text();
+
+                    // Odczyt nagłówków
+                    const headerLine = csvText
+                        .replace(/^\uFEFF/, "")
+                        .split(/\r?\n/, 1)[0];
+
+                    const headers = headerLine
+                        .split(";")
+                        .map(header => header.trim());
+
+                    // Rozpoznawanie formatu
+                    const isSprint = ["SD1", "SD2", "SD3"].every(column =>
+                        headers.includes(column)
+                    );
+
+                    // Wybór odpowiedniego pliku HTML
+                    const templateFile = isSprint
+                        ? "tables/klas.spr.2026.html"
+                        : "tables/klas.norm.2026.html";
+
+                    // Pobranie pliku klasyfikacji
+                    const templateResponse = await fetch(templateFile);
+
+                    if (!templateResponse.ok) {
+                        throw new Error(
+                            "Nie udało się pobrać pliku " + templateFile
+                        );
+                    }
+
+                    const html = await templateResponse.text();
+
+                    // Przygotowanie HTML
+                    const template = document.createElement("template");
+                    template.innerHTML = html;
+
+                    // Pobranie skryptów
+                    const scripts = Array.from(
+                        template.content.querySelectorAll("script")
+                    );
+
+                    const scriptContents = scripts.map(script => ({
+                        src: script.getAttribute("src"),
+                        code: script.textContent,
+                        type: script.getAttribute("type")
+                    }));
+
+                    scripts.forEach(script => script.remove());
+
+                    // Przekazanie ścieżki CSV do pliku klasyfikacji
+                    content.dataset.csvFile = csvFile;
+
+                    // Wstawienie klasyfikacji
+                    content.replaceChildren(template.content);
+
+                    // Uruchomienie skryptów klasyfikacji
+                    for (const scriptInfo of scriptContents) {
+                        const script = document.createElement("script");
+
+                        if (scriptInfo.type) {
+                            script.type = scriptInfo.type;
+                        }
+
+                        if (scriptInfo.src) {
+                            script.src = scriptInfo.src;
+                            document.body.appendChild(script);
+
+                            await new Promise((resolve, reject) => {
+                                script.onload = resolve;
+                                script.onerror = () => reject(
+                                    new Error(
+                                        "Nie udało się uruchomić skryptu."
+                                    )
+                                );
+                            });
+                        } else {
+                            script.textContent = scriptInfo.code;
+                            document.body.appendChild(script);
+                            script.remove();
+                        }
+                    }
+
+                    status.textContent = "";
+                    
+                } catch (error) {
+                    status.textContent = error.message;
+                    status.className = "error";
+                    console.error(error);
+                }
+            }
+
+            dataSelector.addEventListener("change", loadClassification);
+
+            loadClassification();
+        })();
+    </script>
+</section>
