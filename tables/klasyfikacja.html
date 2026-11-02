@@ -1,3 +1,4 @@
+
 <section id="klasyfikacja">
     <style>
         #klasyfikacja .controls {
@@ -22,9 +23,8 @@
 
     <div class="controls">
         <label for="data-selector">Wybierz typera:</label>
-        <select id="data-selector">
-            <option value="2026/typy/17 - Singapur.csv"></option>
-            <option value="2026/typy/18 - USA.csv"></option>
+        <select id="data-selector" disabled>
+            <option value="">Pobieranie listy typerów...</option>
         </select>
     </div>
 
@@ -39,6 +39,11 @@
             const status = section.querySelector("#dispatcher-status");
             const content = section.querySelector("#classification-content");
 
+            const REPO_API =
+                "https://api.github.com/repos/Jan0Pawel/MajstrowyTyperF1/contents/2026/typy";
+
+            let requestId = 0;
+
             // Pobieranie nazwy typera z nazwy pliku
             function getTyperName(filePath) {
                 return filePath
@@ -47,14 +52,71 @@
                     .replace(/\.csv$/i, "");
             }
 
-            // Automatyczne uzupełnianie nazw typerów
-            Array.from(dataSelector.options).forEach(option => {
-                option.textContent = getTyperName(option.value);
-            });
+            // Automatyczne pobieranie listy plików CSV z GitHub
+            async function loadTyperList() {
+                status.textContent = "Pobieranie listy typerów...";
+
+                try {
+                    const response = await fetch(REPO_API, {
+                        cache: "no-store"
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(
+                            "Nie udało się pobrać listy typerów. HTTP " +
+                            response.status
+                        );
+                    }
+
+                    const files = await response.json();
+
+                    const csvFiles = files
+                        .filter(file =>
+                            file.type === "file" &&
+                            /\.csv$/i.test(file.name)
+                        )
+                        .sort((a, b) =>
+                            a.name.localeCompare(b.name, "pl", {
+                                numeric: true,
+                                sensitivity: "base"
+                            })
+                        );
+
+                    if (csvFiles.length === 0) {
+                        throw new Error(
+                            "W katalogu 2026/typy/ nie znaleziono plików CSV."
+                        );
+                    }
+
+                    dataSelector.replaceChildren();
+
+                    csvFiles.forEach(file => {
+                        const option = document.createElement("option");
+
+                        option.value = "2026/typy/" + file.name;
+                        option.textContent = getTyperName(file.name);
+
+                        dataSelector.appendChild(option);
+                    });
+
+                    dataSelector.disabled = false;
+
+                    // Automatyczne wczytanie pierwszego typera
+                    await loadClassification();
+
+                } catch (error) {
+                    status.textContent = error.message;
+                    status.className = "error";
+                    console.error(error);
+                }
+            }
 
             // Rozpoznawanie formatu i ładowanie klasyfikacji
             async function loadClassification() {
+                const currentRequest = ++requestId;
                 const csvFile = dataSelector.value;
+
+                if (!csvFile) return;
 
                 status.textContent = "Rozpoznawanie formatu typera...";
                 status.className = "";
@@ -70,6 +132,8 @@
                     }
 
                     const csvText = await response.text();
+
+                    if (currentRequest !== requestId) return;
 
                     // Odczyt nagłówków
                     const headerLine = csvText
@@ -101,6 +165,8 @@
 
                     const html = await templateResponse.text();
 
+                    if (currentRequest !== requestId) return;
+
                     // Przygotowanie HTML
                     const template = document.createElement("template");
                     template.innerHTML = html;
@@ -126,6 +192,8 @@
 
                     // Uruchomienie skryptów klasyfikacji
                     for (const scriptInfo of scriptContents) {
+                        if (currentRequest !== requestId) return;
+
                         const script = document.createElement("script");
 
                         if (scriptInfo.type) {
@@ -133,16 +201,23 @@
                         }
 
                         if (scriptInfo.src) {
-                            script.src = scriptInfo.src;
-                            document.body.appendChild(script);
-
                             await new Promise((resolve, reject) => {
-                                script.onload = resolve;
-                                script.onerror = () => reject(
-                                    new Error(
-                                        "Nie udało się uruchomić skryptu."
-                                    )
-                                );
+                                script.onload = () => {
+                                    script.remove();
+                                    resolve();
+                                };
+
+                                script.onerror = () => {
+                                    script.remove();
+                                    reject(
+                                        new Error(
+                                            "Nie udało się uruchomić skryptu."
+                                        )
+                                    );
+                                };
+
+                                script.src = scriptInfo.src;
+                                document.body.appendChild(script);
                             });
                         } else {
                             script.textContent = scriptInfo.code;
@@ -151,9 +226,13 @@
                         }
                     }
 
-                    status.textContent = "";
-                    
+                    if (currentRequest === requestId) {
+                        status.textContent = "";
+                    }
+
                 } catch (error) {
+                    if (currentRequest !== requestId) return;
+
                     status.textContent = error.message;
                     status.className = "error";
                     console.error(error);
@@ -162,7 +241,7 @@
 
             dataSelector.addEventListener("change", loadClassification);
 
-            loadClassification();
+            loadTyperList();
         })();
     </script>
 </section>
