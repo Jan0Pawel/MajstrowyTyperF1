@@ -1,0 +1,281 @@
+<section id="classification-table">
+    <style>
+        #classification-table .table-container {
+            overflow-x: auto;
+            background: white;
+            border-radius: 6px;
+        }
+
+        #classification-table table {
+            border-collapse: collapse;
+            width: 100%;
+            white-space: nowrap;
+            font-size: 14px;
+        }
+
+        #classification-table th,
+        #classification-table td {
+            padding: 9px 12px;
+            border: 1px solid #ddd;
+            text-align: center;
+        }
+
+        #classification-table th {
+            background: #222;
+            color: white;
+            position: sticky;
+            top: 0;
+        }
+
+        #classification-table td:nth-child(3),
+        #classification-table th:nth-child(3) {
+            text-align: left;
+        }
+
+        #classification-table tbody tr:nth-child(even) {
+            background: #f2f2f2;
+        }
+
+        #classification-table tbody tr:hover {
+            background: #e0eaff;
+        }
+
+        #classification-table .error {
+            color: #b00020;
+            font-weight: bold;
+        }
+    </style>
+
+    <p id="status">Wczytywanie danych...</p>
+
+    <div class="table-container">
+        <table>
+            <thead id="table-head"></thead>
+            <tbody id="table-body"></tbody>
+        </table>
+    </div>
+
+    <script>
+        (function () {
+            const scoringFile = "punktacja.csv";
+
+            const columns = [
+                "Nick", "Team", "SUMA",
+                "SD1","SD2","SD3",
+                "QP1", "QP2", "QP3",
+                "Q1", "Q2",
+                "par1", "par2", "par3", "par4", "par5",
+                "w1", "w2", "w3", "w4", "w5",
+                "FN1", "FN2", "FN3",
+                "bonusy", "Róż. czasu", "PENALTY"
+            ];
+
+            const section = document.getElementById("classification-table");
+            const content = document.getElementById("classification-content");
+            const csvFile = content.dataset.csvFile;
+
+            const status = section.querySelector("#status");
+            const head = section.querySelector("#table-head");
+            const body = section.querySelector("#table-body");
+
+            function parseCSV(text) {
+                return text
+                    .replace(/^\uFEFF/, "")
+                    .trim()
+                    .split(/\r?\n/)
+                    .map(line =>
+                        line.split(";").map(value => value.trim())
+                    );
+            }
+
+            async function loadTable() {
+                status.textContent = "Wczytywanie danych...";
+                status.className = "";
+
+                try {
+                    const [dataResponse, scoringResponse] =
+                        await Promise.all([
+                            fetch(csvFile),
+                            fetch(scoringFile)
+                        ]);
+
+                    if (!dataResponse.ok) {
+                        throw new Error(
+                            "Nie udało się pobrać pliku " + csvFile
+                        );
+                    }
+
+                    if (!scoringResponse.ok) {
+                        throw new Error(
+                            "Nie udało się pobrać pliku " + scoringFile
+                        );
+                    }
+
+                    const [dataText, scoringText] = await Promise.all([
+                        dataResponse.text(),
+                        scoringResponse.text()
+                    ]);
+
+                    const rows = parseCSV(dataText);
+                    const scoringRows = parseCSV(scoringText);
+
+                    if (rows.length < 2) {
+                        throw new Error(
+                            "Plik CSV nie zawiera danych."
+                        );
+                    }
+
+                    if (scoringRows.length < 2) {
+                        throw new Error(
+                            "Plik punktacji nie zawiera danych."
+                        );
+                    }
+
+                    // Odczyt nagłówków danych
+                    const headers = rows[0].map(header =>
+                        header.replace(/^\uFEFF/, "")
+                    );
+
+                    const indexes = columns.map(column =>
+                        headers.indexOf(column)
+                    );
+
+                    const missing = columns.filter((column, i) =>
+                        indexes[i] === -1
+                    );
+
+                    if (missing.length > 0) {
+                        throw new Error(
+                            "Brak wymaganych kolumn: " +
+                            missing.join(", ")
+                        );
+                    }
+
+                    // Odczyt tabeli punktacji
+                    const scoringHeaders = scoringRows[0].map(header =>
+                        header.replace(/^\uFEFF/, "")
+                    );
+
+                    const positionIndex =
+                        scoringHeaders.indexOf("Pozycja");
+
+                    const pointsIndex =
+                        scoringHeaders.indexOf("Punkty");
+
+                    if (positionIndex === -1 || pointsIndex === -1) {
+                        throw new Error(
+                            "Plik punktacji musi zawierać kolumny " +
+                            "Pozycja i Punkty."
+                        );
+                    }
+
+                    const scoring = new Map();
+
+                    scoringRows.slice(1).forEach(row => {
+                        const position = Number(row[positionIndex]);
+                        const points = Number(row[pointsIndex]);
+
+                        if (
+                            Number.isInteger(position) &&
+                            position > 0 &&
+                            Number.isFinite(points)
+                        ) {
+                            scoring.set(position, points);
+                        }
+                    });
+
+                    // Sortowanie: SUMA malejąco, Róż. czasu rosnąco
+                    const sortedRows = rows.slice(1).sort((a, b) => {
+                        const sumaA = Number(a[indexes[2]]);
+                        const sumaB = Number(b[indexes[2]]);
+
+                        if (sumaA !== sumaB) {
+                            return sumaB - sumaA;
+                        }
+
+                        const czasA = Number(a[indexes[22]]);
+                        const czasB = Number(b[indexes[22]]);
+
+                        return czasA - czasB;
+                    });
+
+                    // Przy identycznej sumie i różnicy czasu:
+                    // to samo miejsce oraz te same punkty.
+                    const rankedRows = sortedRows.map((row, i) => {
+                        let position = i + 1;
+
+                        if (i > 0) {
+                            const previous = sortedRows[i - 1];
+
+                            const sameSum =
+                                Number(row[indexes[2]]) ===
+                                Number(previous[indexes[2]]);
+
+                            const sameTime =
+                                Number(row[indexes[22]]) ===
+                                Number(previous[indexes[22]]);
+
+                            if (sameSum && sameTime) {
+                                position = i;
+                            }
+                        }
+
+                        return {
+                            row,
+                            position,
+                            points: scoring.get(position) ?? 0
+                        };
+                    });
+
+                    // Nagłówki tabeli
+                    const headerRow = document.createElement("tr");
+
+                    ["Pozycja", "Punkty", ...columns].forEach(column => {
+                        const th = document.createElement("th");
+                        th.textContent = column;
+                        headerRow.appendChild(th);
+                    });
+
+                    head.replaceChildren(headerRow);
+
+                    // Wyświetlanie danych
+                    const fragment = document.createDocumentFragment();
+
+                    rankedRows.forEach(item => {
+                        const tr = document.createElement("tr");
+
+                        const positionCell = document.createElement("td");
+                        positionCell.textContent = item.position;
+                        tr.appendChild(positionCell);
+
+                        const pointsCell = document.createElement("td");
+                        pointsCell.textContent = item.points;
+                        tr.appendChild(pointsCell);
+
+                        indexes.forEach(index => {
+                            const td = document.createElement("td");
+                            td.textContent = item.row[index] ?? "";
+                            tr.appendChild(td);
+                        });
+
+                        fragment.appendChild(tr);
+                    });
+
+                    body.replaceChildren(fragment);
+
+                    status.textContent =
+                        "Liczba typerów: " + rankedRows.length;
+
+                    status.className = "";
+
+                } catch (error) {
+                    status.textContent = error.message;
+                    status.className = "error";
+                    console.error(error);
+                }
+            }
+
+            loadTable();
+        })();
+    </script>
+</section>
