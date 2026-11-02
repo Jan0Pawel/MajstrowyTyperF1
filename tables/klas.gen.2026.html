@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Klasyfikacja generalna 2026</title>
+<style>
+  :root { color-scheme: light; --border:#d7dce2; --head:#202a36; --muted:#667085; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:20px; font:14px/1.45 Arial,sans-serif; color:#20242a; background:#f5f6f8; }
+  .wrap { max-width:1500px; margin:auto; }
+  h1 { margin:0 0 14px; font-size:25px; }
+  .toolbar { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-bottom:14px; }
+  button { border:0; border-radius:5px; padding:9px 14px; background:#26384b; color:white; cursor:pointer; }
+  button:disabled { opacity:.55; cursor:wait; }
+  #status { color:var(--muted); }
+  .table-wrap { overflow:auto; background:white; border:1px solid var(--border); border-radius:7px; }
+  table { width:100%; border-collapse:collapse; min-width:850px; }
+  th,td { padding:9px 11px; border-bottom:1px solid #e7e9ed; text-align:left; white-space:nowrap; }
+  th { position:sticky; top:0; z-index:1; background:var(--head); color:white; font-weight:600; }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  tbody tr:nth-child(even) { background:#f8f9fb; }
+  tbody tr:hover { background:#edf3f8; }
+  td.nick { font-weight:600; }
+  .teams { white-space:normal; min-width:150px; }
+  .sub { margin:12px 0 0; color:var(--muted); font-size:12px; }
+  .error { color:#a12626; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Klasyfikacja generalna 2026</h1>
+  <div class="toolbar">
+    <button id="reload" type="button">Odśwież wyniki</button>
+    <span id="status">Oczekiwanie na dane…</span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="num">Pozycja</th>
+          <th>Nick</th>
+          <th>Zespół / zespoły</th>
+          <th class="num">Duże punkty</th>
+          <th class="num">Małe punkty</th>
+          <th class="num">Występy</th>
+          <th class="num">Suma róż. czasu</th>
+        </tr>
+      </thead>
+      <tbody id="classification-body">
+        <tr><td colspan="7">Wczytywanie danych…</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="sub">
+    Zawodnicy są łączeni po nicku bez rozróżniania wielkości liter i wielokrotnych spacji.
+    Zespoły są zapisywane osobno dla każdego występu; zmiana zespołu nie tworzy nowego zawodnika.
+  </p>
+</div>
+
+<script>
+"use strict";
+
+/*
+ * KLUCZ ZAWODNIKA
+ * Tożsamość zawodnika nie zależy od zespołu. Obecnie normalizujemy wyłącznie
+ * wielkość liter i białe znaki. Jeśli w przyszłości zmienią się także same
+ * nicki, można dodać mapę aliasów w NICK_ALIASES.
+ */
+const NICK_ALIASES = {
+  // "nick po zmianie": "nick kanoniczny"
+};
+
+const REPO_API = "https://api.github.com/repos/Jan0Pawel/MajstrowyTyperF1/contents/2026/typy";
+const POINTS_FILE = "punktacja.csv";
+
+const statusEl = document.getElementById("status");
+const bodyEl = document.getElementById("classification-body");
+const reloadButton = document.getElementById("reload");
+
+function normalizeNick(value) {
+  const nick = String(value ?? "").trim().replace(/\s+/g, " ");
+  const lower = nick.toLocaleLowerCase("pl-PL");
+  return NICK_ALIASES[lower]
+    ? String(NICK_ALIASES[lower]).trim().replace(/\s+/g, " ").toLocaleLowerCase("pl-PL")
+    : lower;
+}
+
+function parseCSV(text) {
+  // Parser CSV obsługujący średniki, cudzysłowy i średniki wewnątrz pól.
+  const rows = [];
+  let row = [], field = "", quoted = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+
+    if (quoted) {
+      if (char === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else quoted = false;
+      } else field += char;
+    } else {
+      if (char === '"') quoted = true;
+      else if (char === ";") { row.push(field); field = ""; }
+      else if (char === "\n") {
+        row.push(field); rows.push(row);
+        row = []; field = "";
+      } else if (char !== "\r") field += char;
+    }
+  }
+
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  if (!rows.length) return [];
+
+  const headers = rows.shift().map(h => h.trim().replace(/^\uFEFF/, ""));
+  return rows
+    .filter(r => r.some(v => String(v).trim() !== ""))
+    .map(r => Object.fromEntries(headers.map((h, i) => [h, (r[i] ?? "").trim()])));
+}
+
+function numberValue(value) {
+  if (value === null || value === undefined || String(value).trim() === "") return 0;
+  const cleaned = String(value).trim().replace(/\s/g, "").replace(",", ".");
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function timeValue(value) {
+  // Obsługa liczby (np. sekund z częścią dziesiętną) oraz formatu hh:mm:ss[.sss].
+  const s = String(value ?? "").trim().replace(",", ".");
+  if (!s) return 0;
+  if (/^-?\d+(?:\.\d+)?$/.test(s)) return Number(s);
+
+  const parts = s.split(":");
+  if (parts.length === 2 || parts.length === 3) {
+    const nums = parts.map(Number);
+    if (nums.every(Number.isFinite)) {
+      return parts.length === 3
+        ? nums[0] * 3600 + nums[1] * 60 + nums[2]
+        : nums[0] * 60 + nums[1];
+    }
+  }
+  return 0;
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat("pl-PL", { maximumFractionDigits: 3 }).format(value);
+}
+
+function formatTime(value) {
+  return formatNumber(value);
+}
+
+async function fetchText(url) {
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Błąd pobierania ${url}: HTTP ${response.status}`);
+  return response.text();
+}
+
+async function loadPoints() {
+  const rows = parseCSV(await fetchText(POINTS_FILE));
+  const points = new Map();
+
+  for (const row of rows) {
+    const position = Math.trunc(numberValue(row.Pozycja));
+    const value = numberValue(row.Punkty);
+    if (position > 0) points.set(position, value);
+  }
+  if (!points.size) throw new Error("Nie udało się odczytać punktacji z punktacja.csv.");
+  return points;
+}
+
+async function listTyperFiles() {
+  const response = await fetch(REPO_API, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Nie udało się pobrać listy typerów: HTTP ${response.status}`);
+  const files = await response.json();
+  return files.filter(file => file.type === "file" && /\.csv$/i.test(file.name));
+}
+
+function aggregateOneFile(rows, fileName, pointsTable, totals) {
+  const required = ["Nick", "Team", "SUMA", "Róż. czasu"];
+  if (!rows.length || required.some(key => !(key in rows[0]))) {
+    throw new Error(`Plik ${fileName} nie zawiera wymaganych kolumn: ${required.join(", ")}.`);
+  }
+
+  const competitors = rows
+    .filter(row => String(row.Nick ?? "").trim() !== "")
+    .map(row => ({
+      nick: String(row.Nick).trim().replace(/\s+/g, " "),
+      key: normalizeNick(row.Nick),
+      team: String(row.Team ?? "").trim(),
+      small: numberValue(row.SUMA),
+      time: timeValue(row["Róż. czasu"])
+    }))
+    .filter(row => row.key);
+
+  // Miejsce w pojedynczym typerze: SUMA malejąco, a przy remisie różnica czasu rosnąco.
+  competitors.sort((a, b) => b.small - a.small || a.time - b.time);
+
+  let previous = null;
+  let currentPosition = 0;
+
+  competitors.forEach((competitor, index) => {
+    if (!previous ||
+        competitor.small !== previous.small ||
+        competitor.time !== previous.time) {
+      currentPosition = index + 1;
+    }
+    previous = competitor;
+
+    const bigPoints = pointsTable.get(currentPosition) ?? 0;
+    if (!totals.has(competitor.key)) {
+      totals.set(competitor.key, {
+        nick: competitor.nick,
+        bigPoints: 0,
+        smallPoints: 0,
+        appearances: 0,
+        time: 0,
+        teams: new Set(),
+        teamByAppearance: []
+      });
+    }
+
+    const total = totals.get(competitor.key);
+    total.bigPoints += bigPoints;
+    total.smallPoints += competitor.small;
+    total.appearances += 1;
+    total.time += competitor.time;
+    if (competitor.team) {
+      total.teams.add(competitor.team);
+      total.teamByAppearance.push({ file: fileName.replace(/\.csv$/i, ""), team: competitor.team });
+    }
+  });
+}
+
+function render(totals) {
+  const rows = [...totals.values()].sort((a, b) =>
+    b.bigPoints - a.bigPoints ||
+    b.smallPoints - a.smallPoints ||
+    a.time - b.time
+  );
+
+  let previous = null;
+  let position = 0;
+
+  bodyEl.replaceChildren();
+
+  rows.forEach((item, index) => {
+    if (!previous ||
+        item.bigPoints !== previous.bigPoints ||
+        item.smallPoints !== previous.smallPoints ||
+        item.time !== previous.time) {
+      position = index + 1;
+    }
+    previous = item;
+
+    const tr = document.createElement("tr");
+    const values = [
+      { value: position, cls: "num" },
+      { value: item.nick, cls: "nick" },
+      { value: [...item.teams].join(", "), cls: "teams" },
+      { value: formatNumber(item.bigPoints), cls: "num" },
+      { value: formatNumber(item.smallPoints), cls: "num" },
+      { value: item.appearances, cls: "num" },
+      { value: formatTime(item.time), cls: "num" }
+    ];
+
+    values.forEach(cell => {
+      const td = document.createElement("td");
+      td.className = cell.cls || "";
+      td.textContent = cell.value;
+      tr.appendChild(td);
+    });
+    bodyEl.appendChild(tr);
+  });
+
+  if (!rows.length) {
+    bodyEl.innerHTML = '<tr><td colspan="7">Brak wyników do wyświetlenia.</td></tr>';
+  }
+}
+
+async function loadGeneralClassification() {
+  reloadButton.disabled = true;
+  statusEl.className = "";
+  statusEl.textContent = "Pobieranie plików CSV…";
+  bodyEl.innerHTML = '<tr><td colspan="7">Wczytywanie danych…</td></tr>';
+
+  try {
+    const [files, pointsTable] = await Promise.all([listTyperFiles(), loadPoints()]);
+    const totals = new Map();
+    let loaded = 0;
+
+    for (const file of files) {
+      const csvText = await fetchText(file.download_url);
+      const rows = parseCSV(csvText);
+      aggregateOneFile(rows, file.name, pointsTable, totals);
+      loaded++;
+    }
+
+    render(totals);
+    statusEl.textContent = `Wczytano ${loaded} plików; sklasyfikowano ${totals.size} zawodników.`;
+  } catch (error) {
+    console.error(error);
+    statusEl.className = "error";
+    statusEl.textContent = error.message || "Wystąpił błąd podczas wczytywania klasyfikacji.";
+    bodyEl.innerHTML = '<tr><td colspan="7">Nie udało się wczytać klasyfikacji. Szczegóły znajdują się powyżej.</td></tr>';
+  } finally {
+    reloadButton.disabled = false;
+  }
+}
+
+reloadButton.addEventListener("click", loadGeneralClassification);
+loadGeneralClassification();
+</script>
+</body>
+</html>
