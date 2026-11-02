@@ -1,3 +1,4 @@
+
 <section id="classification-table">
     <style>
         #classification-table .table-container {
@@ -61,10 +62,10 @@
 
             const columns = [
                 "Nick", "Team", "SUMA",
-                "SD1","SD2","SD3",
+                "SD1", "SD2", "SD3",
                 "QP1", "QP2", "QP3",
                 "Q1", "Q2",
-                "par1", "par2", "par3", "par4", "par5",
+                "par1", "par2", "par3", "par4", "par5", "par6",
                 "w1", "w2", "w3", "w4", "w5",
                 "FN1", "FN2", "FN3",
                 "bonusy", "Róż. czasu", "PENALTY"
@@ -140,6 +141,9 @@
                         headers.indexOf(column)
                     );
 
+                    // Indeks kolumny Róż. czasu
+                    const timeIndex = headers.indexOf("Róż. czasu");
+
                     const missing = columns.filter((column, i) =>
                         indexes[i] === -1
                     );
@@ -148,6 +152,12 @@
                         throw new Error(
                             "Brak wymaganych kolumn: " +
                             missing.join(", ")
+                        );
+                    }
+
+                    if (timeIndex === -1) {
+                        throw new Error(
+                            "Brak wymaganej kolumny: Róż. czasu"
                         );
                     }
 
@@ -193,8 +203,8 @@
                             return sumaB - sumaA;
                         }
 
-                        const czasA = Number(a[indexes[22]]);
-                        const czasB = Number(b[indexes[22]]);
+                        const czasA = Number(a[timeIndex]);
+                        const czasB = Number(b[timeIndex]);
 
                         return czasA - czasB;
                     });
@@ -212,8 +222,8 @@
                                 Number(previous[indexes[2]]);
 
                             const sameTime =
-                                Number(row[indexes[22]]) ===
-                                Number(previous[indexes[22]]);
+                                Number(row[timeIndex]) ===
+                                Number(previous[timeIndex]);
 
                             if (sameSum && sameTime) {
                                 position = i;
