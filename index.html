@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pl">
 <head>
@@ -17,11 +16,49 @@
         h1 {
             margin-bottom: 20px;
         }
+
+        .page-controls {
+            margin-bottom: 20px;
+        }
+
+        .page-controls button {
+            padding: 9px 15px;
+            border: none;
+            border-radius: 5px;
+            background: #26384b;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .page-controls button:hover {
+            background: #3b526b;
+        }
+
+        #general-container {
+            margin-bottom: 30px;
+        }
+
+        #general-container[hidden] {
+            display: none;
+        }
     </style>
 </head>
 <body>
 
     <h1>Statystyki typera</h1>
+
+    <div class="page-controls">
+        <button
+            id="toggle-general"
+            type="button"
+            aria-expanded="false"
+        >
+            Pokaż klasyfikację generalną
+        </button>
+    </div>
+
+    <section id="general-container" hidden></section>
 
     <main id="tables-container">
         <p>Wczytywanie tabeli...</p>
@@ -64,6 +101,11 @@
                 }
 
                 if (scriptInfo.src) {
+                    script.onload = () => script.remove();
+                    script.onerror = () => {
+                        script.remove();
+                        console.error("Nie udało się uruchomić skryptu.");
+                    };
                     script.src = scriptInfo.src;
                     document.body.appendChild(script);
 
@@ -94,6 +136,40 @@
                 console.error(error);
             }
         }
+
+        const generalContainer = document.getElementById("general-container");
+        const toggleGeneralButton = document.getElementById("toggle-general");
+
+        let generalLoaded = false;
+
+        toggleGeneralButton.addEventListener("click", async () => {
+            const isVisible = !generalContainer.hidden;
+
+            if (isVisible) {
+                generalContainer.hidden = true;
+                toggleGeneralButton.textContent = "Pokaż klasyfikację generalną";
+                toggleGeneralButton.setAttribute("aria-expanded", "false");
+                return;
+            }
+
+            generalContainer.hidden = false;
+            toggleGeneralButton.textContent = "Ukryj klasyfikację generalną";
+            toggleGeneralButton.setAttribute("aria-expanded", "true");
+
+            if (!generalLoaded) {
+                try {
+                    await loadTemplate(
+                        "tables/klas.gen.2026.html",
+                        generalContainer
+                    );
+
+                    generalLoaded = true;
+                } catch (error) {
+                    generalContainer.textContent = error.message;
+                    console.error(error);
+                }
+            }
+        });
 
         initPage();
     </script>
