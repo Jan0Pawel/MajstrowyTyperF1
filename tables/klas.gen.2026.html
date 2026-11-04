@@ -489,7 +489,8 @@ function sortRows(rows) {
         sensitivity: "base"
       });
     } else {
-      comparison = a[key] - b[key];
+      const numericKey = key === "position" ? "generalPosition" : key;
+      comparison = a[numericKey] - b[numericKey];
     }
 
     // Przy identycznych wartościach zachowujemy kolejność
@@ -636,7 +637,7 @@ async function loadGeneralClassification() {
     render(currentTotals);
 
     statusEl.textContent =
-      `Wczytano ${allFiles.length} plików; sklasyfikowano ${totals.size} zawodników.`;
+      `Wczytano ${allFiles.length} plików; sklasyfikowano ${currentTotals.size} zawodników.`;
   } catch (error) {
     console.error(error);
 
