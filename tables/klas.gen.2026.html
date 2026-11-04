@@ -94,7 +94,15 @@ const ABSENCE_MULTIPLIER = 1.15;
 const statusEl = document.getElementById("status");
 const bodyEl = document.getElementById("classification-body");
 const reloadButton = document.getElementById("reload");
+const tableHead = document.querySelector("thead");
 
+let currentTotals = new Map();
+
+// Brak aktywnego sortowania oznacza domyślną klasyfikację generalną.
+let sortState = {
+  key: null,
+  direction: 1
+};
 function normalizeNick(value) {
   const nick = String(value ?? "").trim().replace(/\s+/g, " ");
   const lower = nick.toLocaleLowerCase("pl-PL");
@@ -456,20 +464,89 @@ function createPlayerTotals(allFiles) {
 
   return totals;
 }
+function sortRows(rows) {
+  // Domyślna kolejność: klasyfikacja generalna.
+  if (sortState.key === null) {
+    return rows;
+  }
 
+  const key = sortState.key;
+  const direction = sortState.direction;
+
+  return [...rows].sort((a, b) => {
+    let comparison = 0;
+
+    if (key === "nick" || key === "teams") {
+      const valueA = key === "nick"
+        ? a.nick
+        : [...a.teams].join(", ");
+
+      const valueB = key === "nick"
+        ? b.nick
+        : [...b.teams].join(", ");
+
+      comparison = valueA.localeCompare(valueB, "pl", {
+        sensitivity: "base"
+      });
+    } else {
+      comparison = a[key] - b[key];
+    }
+
+    // Przy identycznych wartościach zachowujemy kolejność
+    // wynikającą z klasyfikacji generalnej.
+    return comparison === 0
+      ? a.generalPosition - b.generalPosition
+      : comparison * direction;
+  });
+}
+
+function updateSortIndicators() {
+  document.querySelectorAll("th[data-sort]").forEach(th => {
+    const key = th.dataset.sort;
+    const indicator = th.querySelector(".sort-indicator");
+
+    th.classList.toggle("active-sort", key === sortState.key);
+
+    if (key !== sortState.key) {
+      indicator.textContent = "";
+    } else {
+      indicator.textContent =
+        sortState.direction === 1 ? "▲" : "▼";
+    }
+  });
+}
+
+tableHead.addEventListener("click", event => {
+  const th = event.target.closest("th[data-sort]");
+
+  if (!th) return;
+
+  const key = th.dataset.sort;
+
+  if (sortState.key === key) {
+    // Drugie kliknięcie odwraca kierunek.
+    sortState.direction *= -1;
+  } else {
+    // Pierwsze kliknięcie: sortowanie rosnące.
+    sortState.key = key;
+    sortState.direction = 1;
+  }
+
+  render(currentTotals);
+});
 function render(totals) {
-  const rows = [...totals.values()].sort((a, b) =>
+  // Najpierw ustalamy oficjalną kolejność klasyfikacji generalnej.
+  const generalRows = [...totals.values()].sort((a, b) =>
     b.bigPoints - a.bigPoints ||
     b.smallPoints - a.smallPoints ||
     a.time - b.time
   );
 
+  // Przypisujemy stałe pozycje w klasyfikacji generalnej.
   let previous = null;
   let position = 0;
 
-  bodyEl.replaceChildren();
-
-  rows.forEach((item, index) => {
+  generalRows.forEach((item, index) => {
     if (
       !previous ||
       item.bigPoints !== previous.bigPoints ||
@@ -479,12 +556,20 @@ function render(totals) {
       position = index + 1;
     }
 
+    item.generalPosition = position;
     previous = item;
+  });
 
+  // Dopiero teraz stosujemy wybrane sortowanie tabeli.
+  const rows = sortRows(generalRows);
+
+  bodyEl.replaceChildren();
+
+  rows.forEach(item => {
     const tr = document.createElement("tr");
 
     const values = [
-      { value: position, cls: "num" },
+      { value: item.generalPosition, cls: "num" },
       { value: item.nick, cls: "nick" },
       { value: [...item.teams].join(", "), cls: "teams" },
       { value: formatNumber(item.bigPoints), cls: "num" },
@@ -507,6 +592,8 @@ function render(totals) {
     bodyEl.innerHTML =
       '<tr><td colspan="7">Brak wyników do wyświetlenia.</td></tr>';
   }
+
+  updateSortIndicators();
 }
 
 async function loadGeneralClassification() {
@@ -544,9 +631,9 @@ async function loadGeneralClassification() {
     }
 
     // Agregujemy wyniki dopiero po poznaniu wszystkich zawodników.
-    const totals = createPlayerTotals(allFiles);
+    currentTotals = createPlayerTotals(allFiles);
 
-    render(totals);
+    render(currentTotals);
 
     statusEl.textContent =
       `Wczytano ${allFiles.length} plików; sklasyfikowano ${totals.size} zawodników.`;
