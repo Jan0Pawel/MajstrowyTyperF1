@@ -63,9 +63,7 @@
 
 /*
  * KLUCZ ZAWODNIKA
- * Tożsamość zawodnika nie zależy od zespołu. Obecnie normalizujemy wyłącznie
- * wielkość liter i białe znaki. Jeśli w przyszłości zmienią się także same
- * nicki, można dodać mapę aliasów w NICK_ALIASES.
+ * Tożsamość zawodnika nie zależy od zespołu.
  */
 const NICK_ALIASES = {
   // "nick po zmianie": "nick kanoniczny"
@@ -74,6 +72,9 @@ const NICK_ALIASES = {
 const REPO_API = "https://api.github.com/repos/Jan0Pawel/MajstrowyTyperF1/contents/2026/typy";
 const POINTS_FILE = "punktacja.csv";
 
+const ABSENCE_PERCENTILE = 0.85;
+const ABSENCE_MULTIPLIER = 1.15;
+
 const statusEl = document.getElementById("status");
 const bodyEl = document.getElementById("classification-body");
 const reloadButton = document.getElementById("reload");
@@ -81,13 +82,16 @@ const reloadButton = document.getElementById("reload");
 function normalizeNick(value) {
   const nick = String(value ?? "").trim().replace(/\s+/g, " ");
   const lower = nick.toLocaleLowerCase("pl-PL");
+
   return NICK_ALIASES[lower]
-    ? String(NICK_ALIASES[lower]).trim().replace(/\s+/g, " ").toLocaleLowerCase("pl-PL")
+    ? String(NICK_ALIASES[lower])
+        .trim()
+        .replace(/\s+/g, " ")
+        .toLocaleLowerCase("pl-PL")
     : lower;
 }
 
 function parseCSV(text) {
-  // Parser CSV obsługujący średniki, cudzysłowy i średniki wewnątrz pól.
   const rows = [];
   let row = [], field = "", quoted = false;
 
@@ -96,55 +100,123 @@ function parseCSV(text) {
 
     if (quoted) {
       if (char === '"') {
-        if (text[i + 1] === '"') { field += '"'; i++; }
-        else quoted = false;
-      } else field += char;
+        if (text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          quoted = false;
+        }
+      } else {
+        field += char;
+      }
     } else {
-      if (char === '"') quoted = true;
-      else if (char === ";") { row.push(field); field = ""; }
-      else if (char === "\n") {
-        row.push(field); rows.push(row);
-        row = []; field = "";
-      } else if (char !== "\r") field += char;
+      if (char === '"') {
+        quoted = true;
+      } else if (char === ";") {
+        row.push(field);
+        field = "";
+      } else if (char === "\n") {
+        row.push(field);
+        rows.push(row);
+        row = [];
+        field = "";
+      } else if (char !== "\r") {
+        field += char;
+      }
     }
   }
 
-  if (field.length || row.length) { row.push(field); rows.push(row); }
+  if (field.length || row.length) {
+    row.push(field);
+    rows.push(row);
+  }
+
   if (!rows.length) return [];
 
   const headers = rows.shift().map(h => h.trim().replace(/^\uFEFF/, ""));
+
   return rows
     .filter(r => r.some(v => String(v).trim() !== ""))
-    .map(r => Object.fromEntries(headers.map((h, i) => [h, (r[i] ?? "").trim()])));
+    .map(r => Object.fromEntries(
+      headers.map((h, i) => [h, (r[i] ?? "").trim()])
+    ));
 }
 
 function numberValue(value) {
-  if (value === null || value === undefined || String(value).trim() === "") return 0;
-  const cleaned = String(value).trim().replace(/\s/g, "").replace(",", ".");
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return 0;
+  }
+
+  const cleaned = String(value)
+    .trim()
+    .replace(/\s/g, "")
+    .replace(",", ".");
+
   const n = Number(cleaned);
   return Number.isFinite(n) ? n : 0;
 }
 
-function timeValue(value) {
-  // Obsługa liczby (np. sekund z częścią dziesiętną) oraz formatu hh:mm:ss[.sss].
+function parseTimeValue(value) {
+  /*
+   * Zwraca:
+   * - liczbę sekund dla prawidłowej wartości,
+   * - null dla pustego pola.
+   *
+   * Nieprawidłowa, niepusta wartość powoduje błąd,
+   * aby nie została po cichu uwzględniona jako zero.
+   */
   const s = String(value ?? "").trim().replace(",", ".");
-  if (!s) return 0;
-  if (/^-?\d+(?:\.\d+)?$/.test(s)) return Number(s);
+
+  if (!s) return null;
+
+  if (/^-?\d+(?:\.\d+)?$/.test(s)) {
+    return Number(s);
+  }
 
   const parts = s.split(":");
+
   if (parts.length === 2 || parts.length === 3) {
     const nums = parts.map(Number);
+
     if (nums.every(Number.isFinite)) {
       return parts.length === 3
         ? nums[0] * 3600 + nums[1] * 60 + nums[2]
         : nums[0] * 60 + nums[1];
     }
   }
-  return 0;
+
+  throw new Error(`Nieprawidłowa wartość różnicy czasu: "${value}".`);
+}
+
+function calculatePercentile(values, percentile) {
+  /*
+   * Metoda zgodna z Excelowym PERCENTILE.INC:
+   * pozycja = (n - 1) * percentile
+   * interpolacja liniowa pomiędzy sąsiednimi wartościami.
+   */
+  if (!values.length) {
+    throw new Error("Brak prawidłowych wartości różnicy czasu do obliczenia percentyla.");
+  }
+
+  const sorted = [...values].sort((a, b) => a - b);
+
+  const index = (sorted.length - 1) * percentile;
+  const lowerIndex = Math.floor(index);
+  const upperIndex = Math.ceil(index);
+  const fraction = index - lowerIndex;
+
+  if (lowerIndex === upperIndex) {
+    return sorted[lowerIndex];
+  }
+
+  return sorted[lowerIndex] +
+    (sorted[upperIndex] - sorted[lowerIndex]) * fraction;
 }
 
 function formatNumber(value) {
-  return new Intl.NumberFormat("pl-PL", { maximumFractionDigits: 3 }).format(value);
+  return new Intl.NumberFormat("pl-PL", {
+    maximumFractionDigits: 3
+  }).format(value);
 }
 
 function formatTime(value) {
@@ -153,7 +225,11 @@ function formatTime(value) {
 
 async function fetchText(url) {
   const response = await fetch(url, { cache: "no-store" });
-  if (!response.ok) throw new Error(`Błąd pobierania ${url}: HTTP ${response.status}`);
+
+  if (!response.ok) {
+    throw new Error(`Błąd pobierania ${url}: HTTP ${response.status}`);
+  }
+
   return response.text();
 }
 
@@ -164,73 +240,205 @@ async function loadPoints() {
   for (const row of rows) {
     const position = Math.trunc(numberValue(row.Pozycja));
     const value = numberValue(row.Punkty);
-    if (position > 0) points.set(position, value);
+
+    if (position > 0) {
+      points.set(position, value);
+    }
   }
-  if (!points.size) throw new Error("Nie udało się odczytać punktacji z punktacja.csv.");
+
+  if (!points.size) {
+    throw new Error("Nie udało się odczytać punktacji z punktacja.csv.");
+  }
+
   return points;
 }
 
 async function listTyperFiles() {
   const response = await fetch(REPO_API, { cache: "no-store" });
-  if (!response.ok) throw new Error(`Nie udało się pobrać listy typerów: HTTP ${response.status}`);
+
+  if (!response.ok) {
+    throw new Error(`Nie udało się pobrać listy typerów: HTTP ${response.status}`);
+  }
+
   const files = await response.json();
-  return files.filter(file => file.type === "file" && /\.csv$/i.test(file.name));
+
+  return files.filter(file =>
+    file.type === "file" && /\.csv$/i.test(file.name)
+  );
 }
 
-function aggregateOneFile(rows, fileName, pointsTable, totals) {
+/*
+ * ETAP 1
+ * Przygotowanie danych pojedynczego typera.
+ *
+ * Dla każdego pliku:
+ * - odczytujemy zawodników,
+ * - ustalamy ich pozycje,
+ * - przypisujemy duże punkty,
+ * - obliczamy P85,
+ * - obliczamy wartość uzupełniającą P85 * 1,15.
+ *
+ * Nieobecności nie są jeszcze agregowane.
+ */
+function prepareOneFile(rows, fileName, pointsTable) {
   const required = ["Nick", "Team", "SUMA", "Róż. czasu"];
+
   if (!rows.length || required.some(key => !(key in rows[0]))) {
-    throw new Error(`Plik ${fileName} nie zawiera wymaganych kolumn: ${required.join(", ")}.`);
+    throw new Error(
+      `Plik ${fileName} nie zawiera wymaganych kolumn: ${required.join(", ")}.`
+    );
   }
 
   const competitors = rows
     .filter(row => String(row.Nick ?? "").trim() !== "")
-    .map(row => ({
-      nick: String(row.Nick).trim().replace(/\s+/g, " "),
-      key: normalizeNick(row.Nick),
-      team: String(row.Team ?? "").trim(),
-      small: numberValue(row.SUMA),
-      time: timeValue(row["Róż. czasu"])
-    }))
+    .map(row => {
+      const rawTime = String(row["Róż. czasu"] ?? "").trim();
+
+      let parsedTime;
+
+      try {
+        parsedTime = parseTimeValue(rawTime);
+      } catch (error) {
+        throw new Error(
+          `Plik ${fileName}, zawodnik ${row.Nick}: ${error.message}`
+        );
+      }
+
+      return {
+        nick: String(row.Nick).trim().replace(/\s+/g, " "),
+        key: normalizeNick(row.Nick),
+        team: String(row.Team ?? "").trim(),
+        small: numberValue(row.SUMA),
+
+        // Puste pole pozostaje zerem dla faktycznego występu,
+        // zgodnie z dotychczasowym sposobem agregowania danych.
+        time: parsedTime ?? 0,
+
+        // Do obliczenia P85 wykorzystujemy wyłącznie
+        // rzeczywiście dostępne wartości czasu.
+        percentileTime: parsedTime
+      };
+    })
     .filter(row => row.key);
 
-  // Miejsce w pojedynczym typerze: SUMA malejąco, a przy remisie różnica czasu rosnąco.
-  competitors.sort((a, b) => b.small - a.small || a.time - b.time);
+  // Jeden zawodnik powinien występować tylko raz w danym CSV.
+  const competitorMap = new Map();
+
+  for (const competitor of competitors) {
+    if (competitorMap.has(competitor.key)) {
+      throw new Error(
+        `Powielony nick "${competitor.nick}" w pliku ${fileName}.`
+      );
+    }
+
+    competitorMap.set(competitor.key, competitor);
+  }
+
+  // Ranking pojedynczego typera.
+  competitors.sort((a, b) =>
+    b.small - a.small || a.time - b.time
+  );
 
   let previous = null;
   let currentPosition = 0;
 
   competitors.forEach((competitor, index) => {
-    if (!previous ||
-        competitor.small !== previous.small ||
-        competitor.time !== previous.time) {
+    if (
+      !previous ||
+      competitor.small !== previous.small ||
+      competitor.time !== previous.time
+    ) {
       currentPosition = index + 1;
     }
+
     previous = competitor;
 
-    const bigPoints = pointsTable.get(currentPosition) ?? 0;
-    if (!totals.has(competitor.key)) {
-      totals.set(competitor.key, {
-        nick: competitor.nick,
-        bigPoints: 0,
-        smallPoints: 0,
-        appearances: 0,
-        time: 0,
-        teams: new Set(),
-        teamByAppearance: []
-      });
-    }
-
-    const total = totals.get(competitor.key);
-    total.bigPoints += bigPoints;
-    total.smallPoints += competitor.small;
-    total.appearances += 1;
-    total.time += competitor.time;
-    if (competitor.team) {
-      total.teams.add(competitor.team);
-      total.teamByAppearance.push({ file: fileName.replace(/\.csv$/i, ""), team: competitor.team });
-    }
+    competitor.bigPoints =
+      pointsTable.get(currentPosition) ?? 0;
   });
+
+  // Obliczenie P85 z dostępnych wartości różnicy czasu.
+  const availableTimes = competitors
+    .map(competitor => competitor.percentileTime)
+    .filter(value => value !== null);
+
+  if (!availableTimes.length) {
+    throw new Error(
+      `Plik ${fileName}: brak dostępnych wartości w kolumnie "Róż. czasu". Nie można obliczyć P85.`
+    );
+  }
+
+  const percentile85 = calculatePercentile(
+    availableTimes,
+    ABSENCE_PERCENTILE
+  );
+
+  const absenceTime = percentile85 * ABSENCE_MULTIPLIER;
+
+  return {
+    fileName,
+    competitors: competitorMap,
+    absenceTime
+  };
+}
+
+/*
+ * ETAP 2
+ * Utworzenie pełnej listy zawodników ze wszystkich plików.
+ *
+ * Dzięki temu zawodnik występujący dopiero w późniejszym CSV
+ * również otrzyma uzupełnienie za wcześniejsze nieobecności.
+ */
+function createPlayerTotals(allFiles) {
+  const totals = new Map();
+
+  // Najpierw ustalamy wszystkich zawodników.
+  for (const file of allFiles) {
+    for (const competitor of file.competitors.values()) {
+      if (!totals.has(competitor.key)) {
+        totals.set(competitor.key, {
+          nick: competitor.nick,
+          bigPoints: 0,
+          smallPoints: 0,
+          appearances: 0,
+          time: 0,
+          teams: new Set(),
+          teamByAppearance: []
+        });
+      }
+    }
+  }
+
+  // Następnie przechodzimy przez wszystkie pliki.
+  for (const file of allFiles) {
+    for (const [key, total] of totals) {
+      const competitor = file.competitors.get(key);
+
+      if (competitor) {
+        // Zawodnik wystąpił w danym typerze.
+        total.bigPoints += competitor.bigPoints;
+        total.smallPoints += competitor.small;
+        total.appearances += 1;
+        total.time += competitor.time;
+
+        if (competitor.team) {
+          total.teams.add(competitor.team);
+
+          total.teamByAppearance.push({
+            file: file.fileName.replace(/\.csv$/i, ""),
+            team: competitor.team
+          });
+        }
+      } else {
+        // Zawodnik nie wystąpił.
+        // Dodajemy wartość wyliczoną dla konkretnego pliku.
+        // Nie zwiększamy liczby występów ani punktów.
+        total.time += file.absenceTime;
+      }
+    }
+  }
+
+  return totals;
 }
 
 function render(totals) {
@@ -246,15 +454,19 @@ function render(totals) {
   bodyEl.replaceChildren();
 
   rows.forEach((item, index) => {
-    if (!previous ||
-        item.bigPoints !== previous.bigPoints ||
-        item.smallPoints !== previous.smallPoints ||
-        item.time !== previous.time) {
+    if (
+      !previous ||
+      item.bigPoints !== previous.bigPoints ||
+      item.smallPoints !== previous.smallPoints ||
+      item.time !== previous.time
+    ) {
       position = index + 1;
     }
+
     previous = item;
 
     const tr = document.createElement("tr");
+
     const values = [
       { value: position, cls: "num" },
       { value: item.nick, cls: "nick" },
@@ -271,11 +483,13 @@ function render(totals) {
       td.textContent = cell.value;
       tr.appendChild(td);
     });
+
     bodyEl.appendChild(tr);
   });
 
   if (!rows.length) {
-    bodyEl.innerHTML = '<tr><td colspan="7">Brak wyników do wyświetlenia.</td></tr>';
+    bodyEl.innerHTML =
+      '<tr><td colspan="7">Brak wyników do wyświetlenia.</td></tr>';
   }
 }
 
@@ -283,27 +497,52 @@ async function loadGeneralClassification() {
   reloadButton.disabled = true;
   statusEl.className = "";
   statusEl.textContent = "Pobieranie plików CSV…";
-  bodyEl.innerHTML = '<tr><td colspan="7">Wczytywanie danych…</td></tr>';
+
+  bodyEl.innerHTML =
+    '<tr><td colspan="7">Wczytywanie danych…</td></tr>';
 
   try {
-    const [files, pointsTable] = await Promise.all([listTyperFiles(), loadPoints()]);
-    const totals = new Map();
-    let loaded = 0;
+    const [files, pointsTable] = await Promise.all([
+      listTyperFiles(),
+      loadPoints()
+    ]);
 
+    if (!files.length) {
+      throw new Error("Nie znaleziono żadnych plików CSV w folderze typerów.");
+    }
+
+    const allFiles = [];
+
+    // Pobieramy i przygotowujemy każdy plik osobno.
     for (const file of files) {
       const csvText = await fetchText(file.download_url);
       const rows = parseCSV(csvText);
-      aggregateOneFile(rows, file.name, pointsTable, totals);
-      loaded++;
+
+      const preparedFile = prepareOneFile(
+        rows,
+        file.name,
+        pointsTable
+      );
+
+      allFiles.push(preparedFile);
     }
 
+    // Agregujemy wyniki dopiero po poznaniu wszystkich zawodników.
+    const totals = createPlayerTotals(allFiles);
+
     render(totals);
-    statusEl.textContent = `Wczytano ${loaded} plików; sklasyfikowano ${totals.size} zawodników.`;
+
+    statusEl.textContent =
+      `Wczytano ${allFiles.length} plików; sklasyfikowano ${totals.size} zawodników.`;
   } catch (error) {
     console.error(error);
+
     statusEl.className = "error";
-    statusEl.textContent = error.message || "Wystąpił błąd podczas wczytywania klasyfikacji.";
-    bodyEl.innerHTML = '<tr><td colspan="7">Nie udało się wczytać klasyfikacji. Szczegóły znajdują się powyżej.</td></tr>';
+    statusEl.textContent =
+      error.message || "Wystąpił błąd podczas wczytywania klasyfikacji.";
+
+    bodyEl.innerHTML =
+      '<tr><td colspan="7">Nie udało się wczytać klasyfikacji. Szczegóły znajdują się powyżej.</td></tr>';
   } finally {
     reloadButton.disabled = false;
   }
