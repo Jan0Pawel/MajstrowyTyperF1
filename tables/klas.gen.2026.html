@@ -1014,11 +1014,20 @@ async function loadGeneralClassification() {
         );
       }
     }
-
     const allFiles = [];
-
     // Pobieramy i przygotowujemy każdy plik osobno.
     for (const file of files) {
+      const csvText = await fetchText(file.download_url);
+      const rows = parseCSV(csvText);
+
+      const preparedFile = prepareOneFile(
+        rows,
+        file.name,
+        pointsTable
+      );
+
+      allFiles.push(preparedFile);
+    }
 
     // Agregujemy wyniki klasyfikacji generalnej.
     currentTotals = createPlayerTotals(allFiles);
