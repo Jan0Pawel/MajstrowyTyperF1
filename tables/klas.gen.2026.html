@@ -70,23 +70,16 @@
   background: white;
   font: inherit;
 }
-.player-selector {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  margin-bottom: 16px;
-  padding: 12px;
-  border: 1px solid #e7e9ed;
-  border-radius: 5px;
+td.chart-toggle,
+th.chart-toggle {
+  text-align: center;
+  width: 65px;
 }
-.player-option {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
-}
-.player-option input {
+
+td.chart-toggle input {
   cursor: pointer;
+  width: 16px;
+  height: 16px;
 }
 .chart-canvas-wrap {
   position: relative;
@@ -123,9 +116,6 @@
         Odznacz wszystkich
       </button>
     </div>
-    <div id="chart-player-selector" class="player-selector">
-      Wczytywanie zawodników…
-    </div>
     <div class="chart-canvas-wrap">
       <canvas id="season-chart"></canvas>
     </div>
@@ -134,6 +124,7 @@
     <table>
       <thead>
         <tr>
+          <th class="chart-toggle">Wykres</th>
           <th class="num" data-sort="position">Pozycja <span class="sort-indicator"></span></th>
           <th data-sort="nick">Nick <span class="sort-indicator"></span></th>
           <th data-sort="teams">Zespół / zespoły <span class="sort-indicator"></span></th>
@@ -179,7 +170,6 @@ const tableHead = document.querySelector("thead");
 let currentTotals = new Map();
 // Dane wykresu sezonowego.
 const metricSelect = document.getElementById("chart-metric");
-const playerSelector = document.getElementById("chart-player-selector");
 const chartCanvas = document.getElementById("season-chart");
 
 let seasonChart = null;
@@ -530,6 +520,7 @@ function createPlayerTotals(allFiles) {
     for (const competitor of file.competitors.values()) {
       if (!totals.has(competitor.key)) {
         totals.set(competitor.key, {
+          key: competitor.key,
           nick: competitor.nick,
           bigPoints: 0,
           smallPoints: 0,
@@ -651,68 +642,6 @@ function buildSeasonChartData(allFiles) {
   };
 }
 /*
- * LISTA ZAWODNIKÓW DO WYBORU
- */
-function renderChartPlayerSelector() {
-  playerSelector.replaceChildren();
-
-  const players = [...seasonChartData.players.values()]
-    .sort((a, b) =>
-      a.nick.localeCompare(b.nick, "pl", {
-        sensitivity: "base"
-      })
-    );
-
-  // Przy pierwszym uruchomieniu zaznaczamy wszystkich.
-  if (!chartSelectionInitialized) {
-    selectedPlayerKeys = new Set(
-      players.map(player => player.key)
-    );
-
-    chartSelectionInitialized = true;
-  } else {
-    // Usuwamy zaznaczenia zawodników, których już nie ma.
-    const availableKeys = new Set(
-      players.map(player => player.key)
-    );
-
-    selectedPlayerKeys = new Set(
-      [...selectedPlayerKeys].filter(key =>
-        availableKeys.has(key)
-      )
-    );
-  }
-
-  for (const player of players) {
-    const label = document.createElement("label");
-    label.className = "player-option";
-
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = selectedPlayerKeys.has(player.key);
-
-    checkbox.addEventListener("change", () => {
-      if (checkbox.checked) {
-        selectedPlayerKeys.add(player.key);
-      } else {
-        selectedPlayerKeys.delete(player.key);
-      }
-
-      drawSeasonChart();
-    });
-
-    const name = document.createElement("span");
-    name.textContent = player.nick;
-
-    label.appendChild(checkbox);
-    label.appendChild(name);
-
-    playerSelector.appendChild(label);
-  }
-}
-
-
-/*
  * RYSOWANIE WYKRESU
  */
 function drawSeasonChart() {
@@ -720,10 +649,6 @@ function drawSeasonChart() {
 
   // Brak Chart.js nie może blokować działania klasyfikacji.
   if (typeof Chart === "undefined") {
-    if (playerSelector) {
-      playerSelector.textContent =
-        "Wykres niedostępny – nie udało się załadować biblioteki Chart.js.";
-    }
     return;
   }
 
@@ -823,8 +748,6 @@ function drawSeasonChart() {
     }
   });
 }
-
-
 /*
  * ZAZNACZANIE I ODZNACZANIE ZAWODNIKÓW
  */
@@ -836,20 +759,19 @@ document.getElementById("select-all-players")
       seasonChartData.players.keys()
     );
 
-    renderChartPlayerSelector();
+    render(currentTotals);
     drawSeasonChart();
   });
-
 
 document.getElementById("deselect-all-players")
   .addEventListener("click", () => {
+    if (!seasonChartData) return;
+
     selectedPlayerKeys.clear();
 
-    renderChartPlayerSelector();
+    render(currentTotals);
     drawSeasonChart();
   });
-
-
 /*
  * ZMIANA RODZAJU WYŚWIETLANEJ STATYSTYKI
  */
@@ -951,14 +873,55 @@ function render(totals) {
     previous = item;
   });
 
+  // Ustalamy zaznaczenie zawodników do wykresu.
+  const availableKeys = new Set(
+    generalRows.map(item => item.key)
+  );
+
+  if (!chartSelectionInitialized) {
+    // Przy pierwszym uruchomieniu zaznaczamy TOP 20.
+    selectedPlayerKeys = new Set(
+      generalRows
+        .slice(0, 20)
+        .map(item => item.key)
+    );
+
+    chartSelectionInitialized = true;
+  } else {
+    // Przy kolejnym odświeżeniu zachowujemy zaznaczenia.
+    // Usuwamy jedynie zawodników, których już nie ma.
+    selectedPlayerKeys = new Set(
+      [...selectedPlayerKeys].filter(key =>
+        availableKeys.has(key)
+      )
+    );
+  }
+
   // Dopiero teraz stosujemy wybrane sortowanie tabeli.
   const rows = sortRows(generalRows);
-
   bodyEl.replaceChildren();
-
   rows.forEach(item => {
     const tr = document.createElement("tr");
-
+    // Checkbox sterujący widocznością zawodnika na wykresie.
+    const chartTd = document.createElement("td");
+    chartTd.className = "chart-toggle";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = selectedPlayerKeys.has(item.key);
+    checkbox.title = "Pokaż zawodnika na wykresie";
+    checkbox.setAttribute("aria-label",
+      `Pokaż ${item.nick} na wykresie`
+    );
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        selectedPlayerKeys.add(item.key);
+      } else {
+        selectedPlayerKeys.delete(item.key);
+      }
+      drawSeasonChart();
+    });
+    chartTd.appendChild(checkbox);
+    tr.appendChild(chartTd);
     const values = [
       { value: item.generalPosition, cls: "num" },
       { value: item.nick, cls: "nick" },
@@ -968,25 +931,20 @@ function render(totals) {
       { value: item.appearances, cls: "num" },
       { value: formatTime(item.time), cls: "num" }
     ];
-
     values.forEach(cell => {
       const td = document.createElement("td");
       td.className = cell.cls || "";
       td.textContent = cell.value;
       tr.appendChild(td);
     });
-
     bodyEl.appendChild(tr);
   });
-
   if (!rows.length) {
     bodyEl.innerHTML =
-      '<tr><td colspan="7">Brak wyników do wyświetlenia.</td></tr>';
+      '<tr><td colspan="8">Brak wyników do wyświetlenia.</td></tr>';
   }
-
   updateSortIndicators();
 }
-
 async function loadGeneralClassification() {
   reloadButton.disabled = true;
   statusEl.className = "";
@@ -1046,17 +1004,10 @@ async function loadGeneralClassification() {
         // Wyświetlamy klasyfikację generalną.
     render(currentTotals);
 
-    // Wyświetlamy listę zawodników.
-    renderChartPlayerSelector();
-
     // Sprawdzamy, czy biblioteka Chart.js została załadowana.
     if (typeof Chart === "undefined") {
-      playerSelector.textContent =
-        "Wykres niedostępny – nie udało się załadować biblioteki Chart.js.";
-
       statusEl.textContent =
         `Wczytano ${allFiles.length} plików; sklasyfikowano ${currentTotals.size} zawodników. Wykres niedostępny.`;
-
       return;
     }
 
