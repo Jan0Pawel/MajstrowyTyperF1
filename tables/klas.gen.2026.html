@@ -41,6 +41,63 @@
   th[data-sort].active-sort .sort-indicator {
     color: white;
   }
+
+  .chart-panel {
+  margin-bottom: 20px;
+  padding: 16px;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.chart-panel h2 {
+  margin: 0 0 14px;
+  font-size: 19px;
+}
+.chart-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.chart-toolbar label {
+  font-weight: 600;
+}
+.chart-toolbar select {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: white;
+  font: inherit;
+}
+.player-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid #e7e9ed;
+  border-radius: 5px;
+}
+.player-option {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.player-option input {
+  cursor: pointer;
+}
+.chart-canvas-wrap {
+  position: relative;
+  width: 100%;
+  height: 430px;
+}
+@media (max-width: 700px) {
+  .chart-canvas-wrap {
+    height: 340px;
+  }
+}
 </style>
 </head>
 <body>
@@ -49,6 +106,29 @@
   <div class="toolbar">
     <button id="reload" type="button">Odśwież wyniki</button>
     <span id="status">Oczekiwanie na dane…</span>
+  </div>
+  <div class="chart-panel">
+    <h2>Przebieg sezonu</h2>
+    <div class="chart-toolbar">
+      <label for="chart-metric">Wyświetlana statystyka:</label>
+      <select id="chart-metric">
+        <option value="bigPoints">Duże punkty</option>
+        <option value="smallPoints">Małe punkty</option>
+        <option value="time">Róż. czasu</option>
+      </select>
+      <button id="select-all-players" type="button">
+        Zaznacz wszystkich
+      </button>
+      <button id="deselect-all-players" type="button">
+        Odznacz wszystkich
+      </button>
+    </div>
+    <div id="chart-player-selector" class="player-selector">
+      Wczytywanie zawodników…
+    </div>
+    <div class="chart-canvas-wrap">
+      <canvas id="season-chart"></canvas>
+    </div>
   </div>
   <div class="table-wrap">
     <table>
@@ -74,6 +154,7 @@
   </p>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
 "use strict";
 
@@ -97,6 +178,17 @@ const reloadButton = document.getElementById("reload");
 const tableHead = document.querySelector("thead");
 
 let currentTotals = new Map();
+// Dane wykresu sezonowego.
+const metricSelect = document.getElementById("chart-metric");
+const playerSelector = document.getElementById("chart-player-selector");
+const chartCanvas = document.getElementById("season-chart");
+
+let seasonChart = null;
+let seasonChartData = null;
+
+// Zawodnicy zaznaczeni do wyświetlania.
+let selectedPlayerKeys = new Set();
+let chartSelectionInitialized = false;
 
 // Brak aktywnego sortowania oznacza domyślną klasyfikację generalną.
 let sortState = {
@@ -246,7 +338,23 @@ function formatNumber(value) {
 function formatTime(value) {
   return formatNumber(value);
 }
+function parseRaceFileName(fileName) {
+  const match = String(fileName).match(
+    /^(\d+)\s*-\s*(.+)\.csv$/i
+  );
 
+  if (!match) {
+    throw new Error(
+      `Nieprawidłowa nazwa pliku wyścigu: ${fileName}. ` +
+      `Oczekiwany format: numer - lokalizacja.csv`
+    );
+  }
+
+  return {
+    raceNumber: Number(match[1]),
+    raceLabel: `${match[1]} - ${match[2].trim()}`
+  };
+}
 async function fetchText(url) {
   const response = await fetch(url, { cache: "no-store" });
 
@@ -398,9 +506,11 @@ function prepareOneFile(rows, fileName, pointsTable) {
   );
 
   const absenceTime = percentile85 * ABSENCE_MULTIPLIER;
-
+  const raceInfo = parseRaceFileName(fileName);
   return {
     fileName,
+    raceNumber: raceInfo.raceNumber,
+    raceLabel: raceInfo.raceLabel,
     competitors: competitorMap,
     absenceTime
   };
@@ -464,6 +574,278 @@ function createPlayerTotals(allFiles) {
 
   return totals;
 }
+/*
+ * DANE WYKRESU SEZONOWEGO
+ *
+ * Dla każdego zawodnika przechowujemy trzy serie:
+ * - narastające duże punkty,
+ * - narastające małe punkty,
+ * - narastającą różnicę czasu.
+ *
+ * Nieobecności:
+ * - duże punkty: 0,
+ * - małe punkty: 0,
+ * - różnica czasu: P85 * 1,15.
+ */
+function buildSeasonChartData(allFiles) {
+  const players = new Map();
+
+  // Tworzymy pełną listę zawodników.
+  for (const file of allFiles) {
+    for (const competitor of file.competitors.values()) {
+      if (!players.has(competitor.key)) {
+        players.set(competitor.key, {
+          key: competitor.key,
+          nick: competitor.nick,
+
+          bigPoints: [],
+          smallPoints: [],
+          time: []
+        });
+      }
+    }
+  }
+
+  // Wartości narastające dla każdego zawodnika.
+  const cumulative = new Map();
+
+  for (const key of players.keys()) {
+    cumulative.set(key, {
+      bigPoints: 0,
+      smallPoints: 0,
+      time: 0
+    });
+  }
+
+  const labels = [];
+
+  // Przechodzimy przez wyścigi w kolejności sezonu.
+  for (const file of allFiles) {
+    labels.push(file.raceLabel);
+
+    for (const [key, player] of players) {
+      const competitor = file.competitors.get(key);
+      const total = cumulative.get(key);
+
+      if (competitor) {
+        // Zawodnik wystąpił w typerze.
+        total.bigPoints += competitor.bigPoints;
+        total.smallPoints += competitor.small;
+        total.time += competitor.time;
+      } else {
+        // Zawodnik nie wystąpił.
+        // Punkty pozostają bez zmian.
+        // Czas otrzymuje wartość uzupełniającą.
+        total.time += file.absenceTime;
+      }
+
+      // Zapisujemy wynik narastający po danym wyścigu.
+      player.bigPoints.push(total.bigPoints);
+      player.smallPoints.push(total.smallPoints);
+      player.time.push(total.time);
+    }
+  }
+
+  return {
+    labels,
+    players
+  };
+}
+/*
+ * LISTA ZAWODNIKÓW DO WYBORU
+ */
+function renderChartPlayerSelector() {
+  playerSelector.replaceChildren();
+
+  const players = [...seasonChartData.players.values()]
+    .sort((a, b) =>
+      a.nick.localeCompare(b.nick, "pl", {
+        sensitivity: "base"
+      })
+    );
+
+  // Przy pierwszym uruchomieniu zaznaczamy wszystkich.
+  if (!chartSelectionInitialized) {
+    selectedPlayerKeys = new Set(
+      players.map(player => player.key)
+    );
+
+    chartSelectionInitialized = true;
+  } else {
+    // Usuwamy zaznaczenia zawodników, których już nie ma.
+    const availableKeys = new Set(
+      players.map(player => player.key)
+    );
+
+    selectedPlayerKeys = new Set(
+      [...selectedPlayerKeys].filter(key =>
+        availableKeys.has(key)
+      )
+    );
+  }
+
+  for (const player of players) {
+    const label = document.createElement("label");
+    label.className = "player-option";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = selectedPlayerKeys.has(player.key);
+
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        selectedPlayerKeys.add(player.key);
+      } else {
+        selectedPlayerKeys.delete(player.key);
+      }
+
+      drawSeasonChart();
+    });
+
+    const name = document.createElement("span");
+    name.textContent = player.nick;
+
+    label.appendChild(checkbox);
+    label.appendChild(name);
+
+    playerSelector.appendChild(label);
+  }
+}
+
+
+/*
+ * RYSOWANIE WYKRESU
+ */
+function drawSeasonChart() {
+  if (!seasonChartData) return;
+
+  const metric = metricSelect.value;
+
+  const metricNames = {
+    bigPoints: "Duże punkty – suma narastająca",
+    smallPoints: "Małe punkty – suma narastająca",
+    time: "Róż. czasu – suma narastająca"
+  };
+
+  const players = [...seasonChartData.players.values()]
+    .filter(player =>
+      selectedPlayerKeys.has(player.key)
+    );
+
+  const datasets = players.map((player, index) => {
+    const hue = (index * 137.508) % 360;
+    const color = `hsl(${hue}, 65%, 45%)`;
+
+    return {
+      label: player.nick,
+      data: player[metric],
+
+      borderColor: color,
+      backgroundColor: color,
+
+      borderWidth: 2,
+      pointRadius: 2,
+      pointHoverRadius: 5,
+      tension: 0.15,
+
+      fill: false
+    };
+  });
+
+  if (seasonChart) {
+    seasonChart.destroy();
+  }
+
+  seasonChart = new Chart(chartCanvas, {
+    type: "line",
+
+    data: {
+      labels: seasonChartData.labels,
+      datasets
+    },
+
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+
+      interaction: {
+        mode: "index",
+        intersect: false
+      },
+
+      plugins: {
+        legend: {
+          display: false
+        },
+
+        tooltip: {
+          callbacks: {
+            label: context => {
+              const value = context.parsed.y;
+
+              return metric === "time"
+                ? `${context.dataset.label}: ${formatTime(value)}`
+                : `${context.dataset.label}: ${formatNumber(value)}`;
+            }
+          }
+        }
+      },
+
+      scales: {
+        x: {
+          title: {
+            display: true,
+            text: "Wyścig"
+          }
+        },
+
+        y: {
+          beginAtZero: true,
+
+          title: {
+            display: true,
+            text: metricNames[metric]
+          },
+
+          ticks: {
+            callback: value => formatNumber(value)
+          }
+        }
+      }
+    }
+  });
+}
+
+
+/*
+ * ZAZNACZANIE I ODZNACZANIE ZAWODNIKÓW
+ */
+document.getElementById("select-all-players")
+  .addEventListener("click", () => {
+    if (!seasonChartData) return;
+
+    selectedPlayerKeys = new Set(
+      seasonChartData.players.keys()
+    );
+
+    renderChartPlayerSelector();
+    drawSeasonChart();
+  });
+
+
+document.getElementById("deselect-all-players")
+  .addEventListener("click", () => {
+    selectedPlayerKeys.clear();
+
+    renderChartPlayerSelector();
+    drawSeasonChart();
+  });
+
+
+/*
+ * ZMIANA RODZAJU WYŚWIETLANEJ STATYSTYKI
+ */
+metricSelect.addEventListener("change", drawSeasonChart);
 function sortRows(rows) {
   // Domyślna kolejność: klasyfikacja generalna.
   if (sortState.key === null) {
@@ -615,25 +997,40 @@ async function loadGeneralClassification() {
       throw new Error("Nie znaleziono żadnych plików CSV w folderze typerów.");
     }
 
+        // Sortowanie plików według numeru wyścigu.
+    files.sort((a, b) =>
+      parseRaceFileName(a.name).raceNumber -
+      parseRaceFileName(b.name).raceNumber
+    );
+
+    // Sprawdzamy, czy nie ma dwóch plików z tym samym numerem.
+    for (let i = 1; i < files.length; i++) {
+      const previous = parseRaceFileName(files[i - 1].name);
+      const current = parseRaceFileName(files[i].name);
+
+      if (previous.raceNumber === current.raceNumber) {
+        throw new Error(
+          `Dwa pliki mają ten sam numer wyścigu: ${previous.raceNumber}.`
+        );
+      }
+    }
+
     const allFiles = [];
 
     // Pobieramy i przygotowujemy każdy plik osobno.
     for (const file of files) {
-      const csvText = await fetchText(file.download_url);
-      const rows = parseCSV(csvText);
 
-      const preparedFile = prepareOneFile(
-        rows,
-        file.name,
-        pointsTable
-      );
-
-      allFiles.push(preparedFile);
-    }
-
-    // Agregujemy wyniki dopiero po poznaniu wszystkich zawodników.
+    // Agregujemy wyniki klasyfikacji generalnej.
     currentTotals = createPlayerTotals(allFiles);
 
+    // Przygotowujemy dane narastające wykresu sezonowego.
+    seasonChartData = buildSeasonChartData(allFiles);
+
+    // Wyświetlamy listę zawodników i wykres.
+    renderChartPlayerSelector();
+    drawSeasonChart();
+
+    // Wyświetlamy klasyfikację generalną.
     render(currentTotals);
 
     statusEl.textContent =
