@@ -718,6 +718,15 @@ function renderChartPlayerSelector() {
 function drawSeasonChart() {
   if (!seasonChartData) return;
 
+  // Brak Chart.js nie może blokować działania klasyfikacji.
+  if (typeof Chart === "undefined") {
+    if (playerSelector) {
+      playerSelector.textContent =
+        "Wykres niedostępny – nie udało się załadować biblioteki Chart.js.";
+    }
+    return;
+  }
+
   const metric = metricSelect.value;
 
   const metricNames = {
