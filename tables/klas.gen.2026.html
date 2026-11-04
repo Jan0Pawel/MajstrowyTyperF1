@@ -25,6 +25,22 @@
   .teams { white-space:normal; min-width:150px; }
   .sub { margin:12px 0 0; color:var(--muted); font-size:12px; }
   .error { color:#a12626; }
+  th[data-sort] {
+    cursor: pointer;
+    user-select: none;
+  }
+  th[data-sort]:hover {
+    background: #34485e;
+  }
+  .sort-indicator {
+    display: inline-block;
+    margin-left: 4px;
+    color: #aebdce;
+    font-size: 11px;
+  }
+  th[data-sort].active-sort .sort-indicator {
+    color: white;
+  }
 </style>
 </head>
 <body>
@@ -38,13 +54,13 @@
     <table>
       <thead>
         <tr>
-          <th class="num">Pozycja</th>
-          <th>Nick</th>
-          <th>Zespół / zespoły</th>
-          <th class="num">Duże punkty</th>
-          <th class="num">Małe punkty</th>
-          <th class="num">Występy</th>
-          <th class="num">Suma róż. czasu</th>
+          <th class="num" data-sort="position">Pozycja <span class="sort-indicator"></span></th>
+          <th data-sort="nick">Nick <span class="sort-indicator"></span></th>
+          <th data-sort="teams">Zespół / zespoły <span class="sort-indicator"></span></th>
+          <th class="num" data-sort="bigPoints">Duże punkty <span class="sort-indicator"></span></th>
+          <th class="num" data-sort="smallPoints">Małe punkty <span class="sort-indicator"></span></th>
+          <th class="num" data-sort="appearances">Występy <span class="sort-indicator"></span></th>
+          <th class="num" data-sort="time">Suma róż. czasu <span class="sort-indicator"></span></th>
         </tr>
       </thead>
       <tbody id="classification-body">
