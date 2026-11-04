@@ -153,7 +153,7 @@
     Zespoły są zapisywane osobno dla każdego występu; zmiana zespołu nie tworzy nowego zawodnika.
   </p>
 </div>
-
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
 "use strict";
 
@@ -1034,12 +1034,25 @@ async function loadGeneralClassification() {
     // Przygotowujemy dane narastające wykresu sezonowego.
     seasonChartData = buildSeasonChartData(allFiles);
 
-    // Wyświetlamy listę zawodników i wykres.
-    renderChartPlayerSelector();
-    drawSeasonChart();
-
-    // Wyświetlamy klasyfikację generalną.
+        // Wyświetlamy klasyfikację generalną.
     render(currentTotals);
+
+    // Wyświetlamy listę zawodników.
+    renderChartPlayerSelector();
+
+    // Sprawdzamy, czy biblioteka Chart.js została załadowana.
+    if (typeof Chart === "undefined") {
+      playerSelector.textContent =
+        "Wykres niedostępny – nie udało się załadować biblioteki Chart.js.";
+
+      statusEl.textContent =
+        `Wczytano ${allFiles.length} plików; sklasyfikowano ${currentTotals.size} zawodników. Wykres niedostępny.`;
+
+      return;
+    }
+
+    // Rysujemy wykres.
+    drawSeasonChart();
 
     statusEl.textContent =
       `Wczytano ${allFiles.length} plików; sklasyfikowano ${currentTotals.size} zawodników.`;
