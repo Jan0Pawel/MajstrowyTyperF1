@@ -1,0 +1,141 @@
+/*
+ * Kolory zespołów F1 – przykład dla sezonu 2026.
+ * --team-*-bg   : kolor tła
+ * --team-*-text : kolor tekstu
+ *
+ * Klasy .team-* można przypisywać do wierszy tabeli.
+ * Zmienne CSS mogą być później odczytywane także z JavaScriptu
+ * na potrzeby kolorów linii wykresu Chart.js.
+ */
+
+:root {
+  --team-Parnelli-bg: #e06666;
+  --team-Parnelli-text: #FFFFFF;
+
+  --team-Caterham-bg: #005030;
+  --team-Caterham-text: #fbbc04;
+
+  --team-Honda-bg: #ff0000;
+  --team-Honda-text: #101820;
+
+  --team-Brabham-bg: #00843d;
+  --team-Brabham-text: #ffc000;
+
+  --team-Eagle-bg: #1c4587;
+  --team-Eagle-text: #ffffff;
+
+  --team-Tyrrell-bg: #0b5394;
+  --team-Tyrrell-text: #ffffff;
+
+  --team-Wolf-bg: #000000;
+  --team-Wolf-text: #f1c232;
+
+  --team-Toyota-bg: #ff0000;
+  --team-Toyota-text: #ffffff;
+
+  --team-Boro-bg: #3c78d8;
+  --team-Boro-text: #ffffff;
+
+  --team-Porsche-bg: #000000;
+  --team-Porsche-text: #ffffff;
+
+  --team-Trojan-bg: #27294f;
+  --team-Trojan-text: #ea5649;
+
+  --team-Cooper-bg: #004225;
+  --team-Cooper-text: #ffffff;
+  
+  --team-BMW_Sauber-bg: #ffffff;
+  --team-BMW_Sauber-text: #1c4587;
+
+  --team-Hesketh-bg: #b7b7b7;
+  --team-Hesketh-text: #ffffff;
+  
+  --team-Renault-bg: #ffff00;
+  --team-Renault-text: #000000;
+
+  --team-HRT-bg: #f3f3f3;
+  --team-HRT-text: #bf9000;
+}
+
+/* Klasy kolorystyczne dla wierszy tabeli */
+
+.team-Parnelli {
+  background-color: var(--team-Parnelli-bg);
+  color: var(--team-Parnelli-text);
+}
+
+.team-Caterham {
+  background-color: var(--team-Caterham-bg);
+  color: var(--team-Caterham-text);
+}
+
+.team-Honda {
+  background-color: var(--team-Honda-bg);
+  color: var(--team-Honda-text);
+}
+
+.team-Brabham {
+  background-color: var(--team-Brabham-bg);
+  color: var(--team-Brabham-text);
+}
+
+.team-Eagle {
+  background-color: var(--team-Eagle-bg);
+  color: var(--team-Eagle-text);
+}
+
+.team-Tyrrell {
+  background-color: var(--team-Tyrrell-bg);
+  color: var(--team-Tyrrell-text);
+}
+
+.team-Wolf {
+  background-color: var(--team-Wolf-bg);
+  color: var(--team-Wolf-text);
+}
+
+.team-Toyota {
+  background-color: var(--team-Toyota-bg);
+  color: var(--team-Toyota-text);
+}
+
+.team-Boro {
+  background-color: var(--team-Boro-bg);
+  color: var(--team-Boro-text);
+}
+
+.team-Porsche {
+  background-color: var(--team-Porsche-bg);
+  color: var(--team-Porsche-text);
+}
+
+.team-Trojan {
+  background-color: var(--team-Trojan-bg);
+  color: var(--team-Trojan-text);
+}
+
+.team-Cooper {
+  background-color: var(--team-Cooper-bg);
+  color: var(--team-Cooper-text);
+}
+
+.team-BMW_Sauber {
+  background-color: var(--team-BMW_Sauber-bg);
+  color: var(--team-BMW_Sauber-text);
+}
+
+.team-Hesketh {
+  background-color: var(--team-Hesketh-bg);
+  color: var(--team-Hesketh-text);
+}
+
+.team-Renault {
+  background-color: var(--team-Renault-bg);
+  color: var(--team-Renault-text);
+}
+
+.team-HRT {
+  background-color: var(--team-HRT-bg);
+  color: var(--team-HRT-text);
+}
