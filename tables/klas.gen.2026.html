@@ -19,8 +19,12 @@
   th,td { padding:9px 11px; border-bottom:1px solid #e7e9ed; text-align:left; white-space:nowrap; }
   th { position:sticky; top:0; z-index:1; background:var(--head); color:white; font-weight:600; }
   td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
-  tbody tr:nth-child(even) { background:#f8f9fb; }
-  tbody tr:hover { background:#edf3f8; }
+  tbody tr:nth-child(even):not([class^="team-"]) {
+    background: #f8f9fb;
+  }
+  tbody tr:hover:not([class^="team-"]) {
+    background: #edf3f8;
+  }
   td.nick { font-weight:600; }
   .teams { white-space:normal; min-width:150px; }
   .sub { margin:12px 0 0; color:var(--muted); font-size:12px; }
@@ -92,6 +96,7 @@ td.chart-toggle input {
   }
 }
 </style>
+<link rel="stylesheet" href="../2026/zespoły.css">
 </head>
 <body>
 <div class="wrap">
@@ -326,6 +331,28 @@ function formatNumber(value) {
 
 function formatTime(value) {
   return formatNumber(value);
+}
+function getTeamColors(team) {
+  if (!team) return null;
+
+  const styles = getComputedStyle(document.documentElement);
+
+  const background = styles
+    .getPropertyValue(`--team-${team}-bg`)
+    .trim();
+
+  const text = styles
+    .getPropertyValue(`--team-${team}-text`)
+    .trim();
+
+  if (!background || !text) {
+    return null;
+  }
+
+  return {
+    background,
+    text
+  };
 }
 function parseRaceFileName(fileName) {
   const match = String(fileName).match(
@@ -665,9 +692,17 @@ function drawSeasonChart() {
       selectedPlayerKeys.has(player.key)
     );
 
-  const datasets = players.map((player, index) => {
-    const hue = (index * 137.508) % 360;
-    const color = `hsl(${hue}, 65%, 45%)`;
+  const datasets = players.map(player => {
+    const total = currentTotals.get(player.key);
+
+    const lastAppearance = total?.teamByAppearance[
+      total.teamByAppearance.length - 1
+    ];
+
+    const currentTeam = lastAppearance?.team;
+    const teamColors = getTeamColors(currentTeam);
+
+    const color = teamColors?.background ?? "#667085";
 
     return {
       label: player.nick,
@@ -902,6 +937,15 @@ function render(totals) {
   bodyEl.replaceChildren();
   rows.forEach(item => {
     const tr = document.createElement("tr");
+    // Kolor wiersza według ostatniego zespołu zawodnika.
+    const lastAppearance = item.teamByAppearance[
+      item.teamByAppearance.length - 1
+    ];
+    const currentTeam = lastAppearance?.team;
+    const teamColors = getTeamColors(currentTeam);
+    if (teamColors) {
+      tr.classList.add(`team-${currentTeam}`);
+    }
     // Checkbox sterujący widocznością zawodnika na wykresie.
     const chartTd = document.createElement("td");
     chartTd.className = "chart-toggle";
