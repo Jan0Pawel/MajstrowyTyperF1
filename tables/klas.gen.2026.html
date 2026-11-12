@@ -114,6 +114,10 @@ td.chart-toggle input {
         <option value="smallPoints">Małe punkty</option>
         <option value="time">Róż. czasu</option>
       </select>
+      <label for="chart-compare-player">Porównaj z zawodnikiem:</label>
+      <select id="chart-compare-player">
+        <option value="">Brak porównania</option>
+      </select>
       <button id="select-all-players" type="button">
         Zaznacz wszystkich
       </button>
@@ -175,6 +179,7 @@ const tableHead = document.querySelector("thead");
 let currentTotals = new Map();
 // Dane wykresu sezonowego.
 const metricSelect = document.getElementById("chart-metric");
+const comparePlayerSelect = document.getElementById("chart-compare-player");
 const chartCanvas = document.getElementById("season-chart");
 
 let seasonChart = null;
@@ -669,6 +674,38 @@ function buildSeasonChartData(allFiles) {
   };
 }
 /*
+ * UZUPEŁNIANIE LISTY ZAWODNIKA PORÓWNAWCZEGO
+ */
+function updateComparePlayerOptions() {
+  const previousValue = comparePlayerSelect.value;
+
+  comparePlayerSelect.replaceChildren();
+
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  defaultOption.textContent = "Brak porównania";
+  comparePlayerSelect.appendChild(defaultOption);
+
+  const players = [...seasonChartData.players.values()]
+    .sort((a, b) => a.nick.localeCompare(b.nick, "pl"));
+
+  for (const player of players) {
+    const option = document.createElement("option");
+
+    option.value = player.key;
+    option.textContent = player.nick;
+
+    comparePlayerSelect.appendChild(option);
+  }
+
+  // Zachowujemy poprzedni wybór, jeżeli zawodnik nadal istnieje.
+  if (seasonChartData.players.has(previousValue)) {
+    comparePlayerSelect.value = previousValue;
+  } else {
+    comparePlayerSelect.value = "";
+  }
+}
+/*
  * RYSOWANIE WYKRESU
  */
 function drawSeasonChart() {
@@ -687,10 +724,27 @@ function drawSeasonChart() {
     time: "Róż. czasu – suma narastająca"
   };
 
+  // Zawodnik wybrany jako punkt odniesienia.
+  const referenceKey = comparePlayerSelect.value;
+
+  const referencePlayer = referenceKey
+    ? seasonChartData.players.get(referenceKey)
+    : null;
+
+  // Pobieramy zawodników zaznaczonych checkboxami.
   const players = [...seasonChartData.players.values()]
     .filter(player =>
       selectedPlayerKeys.has(player.key)
     );
+
+  // Zawodnik porównawczy musi być widoczny na wykresie,
+  // nawet jeżeli jego checkbox nie jest zaznaczony.
+  if (
+    referencePlayer &&
+    !players.some(player => player.key === referencePlayer.key)
+  ) {
+    players.push(referencePlayer);
+  }
 
   const datasets = players.map(player => {
     const total = currentTotals.get(player.key);
@@ -705,9 +759,23 @@ function drawSeasonChart() {
     const lineColor = teamColors?.background ?? "#667085";
     const pointColor = teamColors?.text ?? "#667085";
 
+    // W trybie porównania odejmujemy wartości
+    // zawodnika porównawczego od wartości danego zawodnika.
+    const chartValues = referencePlayer
+      ? player[metric].map((value, index) =>
+          value - referencePlayer[metric][index]
+        )
+      : player[metric];
+
+    const isReference = referencePlayer &&
+      player.key === referencePlayer.key;
+
     return {
-      label: player.nick,
-      data: player[metric],
+      label: isReference
+        ? `${player.nick} (punkt odniesienia)`
+        : player.nick,
+
+      data: chartValues,
 
       borderColor: lineColor,
       backgroundColor: pointColor,
@@ -716,9 +784,12 @@ function drawSeasonChart() {
       pointBorderColor: lineColor,
 
       borderWidth: 2,
-      pointRadius: 2,
+      pointRadius: isReference ? 0 : 2,
       pointHoverRadius: 5,
       tension: 0.15,
+
+      // Linia zawodnika porównawczego jest przerywana.
+      borderDash: isReference ? [6, 4] : [],
 
       fill: false
     };
@@ -772,11 +843,14 @@ function drawSeasonChart() {
         },
 
         y: {
-          beginAtZero: true,
+          // W trybie porównania dopuszczamy wartości ujemne.
+          beginAtZero: !referencePlayer,
 
           title: {
             display: true,
-            text: metricNames[metric]
+            text: referencePlayer
+              ? `${metricNames[metric]} względem ${referencePlayer.nick}`
+              : metricNames[metric]
           },
 
           ticks: {
@@ -814,7 +888,7 @@ document.getElementById("deselect-all-players")
 /*
  * ZMIANA RODZAJU WYŚWIETLANEJ STATYSTYKI
  */
-metricSelect.addEventListener("change", drawSeasonChart);
+comparePlayerSelect.addEventListener("change", drawSeasonChart);
 function sortRows(rows) {
   // Domyślna kolejność: klasyfikacja generalna.
   if (sortState.key === null) {
@@ -1042,16 +1116,14 @@ async function loadGeneralClassification() {
 
       allFiles.push(preparedFile);
     }
-
     // Agregujemy wyniki klasyfikacji generalnej.
     currentTotals = createPlayerTotals(allFiles);
-
     // Przygotowujemy dane narastające wykresu sezonowego.
     seasonChartData = buildSeasonChartData(allFiles);
-
-        // Wyświetlamy klasyfikację generalną.
+    // Uzupełniamy listę zawodników do porównania.
+    updateComparePlayerOptions();
+    // Wyświetlamy klasyfikację generalną.
     render(currentTotals);
-
     // Sprawdzamy, czy biblioteka Chart.js została załadowana.
     if (typeof Chart === "undefined") {
       statusEl.textContent =
