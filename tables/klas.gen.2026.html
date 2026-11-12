@@ -141,10 +141,15 @@ td.chart-toggle input {
           <th class="num" data-sort="smallPoints">Małe punkty <span class="sort-indicator"></span></th>
           <th class="num" data-sort="appearances">Występy <span class="sort-indicator"></span></th>
           <th class="num" data-sort="time">Suma róż. czasu <span class="sort-indicator"></span></th>
+          <th class="num" data-sort="bigPointsPerAppearance">Duże pkt / występ <span class="sort-indicator"></span></th>
+          <th class="num" data-sort="smallPointsPerAppearance">Małe pkt / występ <span class="sort-indicator"></span></th>
+          <th class="num" data-sort="medianTime">Mediana róż. czasu <span class="sort-indicator"></span></th>
+          <th class="num" data-sort="minTime">Min. róż. czasu <span class="sort-indicator"></span></th>
+          <th class="num" data-sort="maxTime">Maks. róż. czasu <span class="sort-indicator"></span></th>
         </tr>
       </thead>
       <tbody id="classification-body">
-        <tr><td colspan="7">Wczytywanie danych…</td></tr>
+        <tr><td colspan="13">Wczytywanie danych…</td></tr>
       </tbody>
     </table>
   </div>
@@ -336,6 +341,15 @@ function formatNumber(value) {
 
 function formatTime(value) {
   return formatNumber(value);
+}
+function calculateMedian(values) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) {
+    return sorted[middle];
+  }
+  return (sorted[middle - 1] + sorted[middle]) / 2;
 }
 function getTeamColors(team) {
   if (!team) return null;
@@ -558,6 +572,7 @@ function createPlayerTotals(allFiles) {
           smallPoints: 0,
           appearances: 0,
           time: 0,
+          timeValues: [],
           teams: new Set(),
           teamByAppearance: []
         });
@@ -576,6 +591,7 @@ function createPlayerTotals(allFiles) {
         total.smallPoints += competitor.small;
         total.appearances += 1;
         total.time += competitor.time;
+        total.timeValues.push(competitor.time);
 
         if (competitor.team) {
           total.teams.add(competitor.team);
@@ -592,6 +608,24 @@ function createPlayerTotals(allFiles) {
         total.time += file.absenceTime;
       }
     }
+  }
+    // Obliczamy dodatkowe statystyki zawodników.
+  for (const total of totals.values()) {
+    total.bigPointsPerAppearance =
+      total.bigPoints / total.appearances;
+
+    total.smallPointsPerAppearance =
+      total.smallPoints / total.appearances;
+
+    total.medianTime = calculateMedian(total.timeValues);
+
+    total.minTime = total.timeValues.length
+      ? Math.min(...total.timeValues)
+      : null;
+
+    total.maxTime = total.timeValues.length
+      ? Math.max(...total.timeValues)
+      : null;
   }
 
   return totals;
@@ -916,7 +950,18 @@ function sortRows(rows) {
       });
     } else {
       const numericKey = key === "position" ? "generalPosition" : key;
-      comparison = a[numericKey] - b[numericKey];
+      const valueA = a[numericKey];
+      const valueB = b[numericKey];
+      // Brak wartości umieszczamy na końcu niezależnie od kierunku sortowania.
+      if (valueA === null || valueB === null) {
+        if (valueA === null && valueB === null) {
+          comparison = 0;
+        } else {
+          return valueA === null ? 1 : -1;
+        }
+      } else {
+        comparison = valueA - valueB;
+      }
     }
 
     // Przy identycznych wartościach zachowujemy kolejność
@@ -1052,7 +1097,14 @@ function render(totals) {
       { value: formatNumber(item.bigPoints), cls: "num" },
       { value: formatNumber(item.smallPoints), cls: "num" },
       { value: item.appearances, cls: "num" },
-      { value: formatTime(item.time), cls: "num" }
+      { value: formatTime(item.time), cls: "num" },
+
+      { value: formatNumber(item.bigPointsPerAppearance), cls: "num" },
+      { value: formatNumber(item.smallPointsPerAppearance), cls: "num" },
+
+      { value: item.medianTime === null ? "—" : formatTime(item.medianTime), cls: "num" },
+      { value: item.minTime === null ? "—" : formatTime(item.minTime), cls: "num" },
+      { value: item.maxTime === null ? "—" : formatTime(item.maxTime), cls: "num" }
     ];
     values.forEach(cell => {
       const td = document.createElement("td");
@@ -1064,7 +1116,7 @@ function render(totals) {
   });
   if (!rows.length) {
     bodyEl.innerHTML =
-      '<tr><td colspan="8">Brak wyników do wyświetlenia.</td></tr>';
+      '<tr><td colspan="13">Brak wyników do wyświetlenia.</td></tr>';
   }
   updateSortIndicators();
 }
@@ -1074,7 +1126,7 @@ async function loadGeneralClassification() {
   statusEl.textContent = "Pobieranie plików CSV…";
 
   bodyEl.innerHTML =
-    '<tr><td colspan="7">Wczytywanie danych…</td></tr>';
+    '<tr><td colspan="13">Wczytywanie danych…</td></tr>';
 
   try {
     const [files, pointsTable] = await Promise.all([
@@ -1145,7 +1197,7 @@ async function loadGeneralClassification() {
       error.message || "Wystąpił błąd podczas wczytywania klasyfikacji.";
 
     bodyEl.innerHTML =
-      '<tr><td colspan="7">Nie udało się wczytać klasyfikacji. Szczegóły znajdują się powyżej.</td></tr>';
+      '<tr><td colspan="13">Nie udało się wczytać klasyfikacji. Szczegóły znajdują się powyżej.</td></tr>';
   } finally {
     reloadButton.disabled = false;
   }
