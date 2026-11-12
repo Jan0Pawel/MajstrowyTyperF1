@@ -888,6 +888,7 @@ document.getElementById("deselect-all-players")
 /*
  * ZMIANA RODZAJU WYŚWIETLANEJ STATYSTYKI
  */
+metricSelect.addEventListener("change", drawSeasonChart);
 comparePlayerSelect.addEventListener("change", drawSeasonChart);
 function sortRows(rows) {
   // Domyślna kolejność: klasyfikacja generalna.
