@@ -79,7 +79,6 @@ th.chart-toggle {
   text-align: center;
   width: 65px;
 }
-
 td.chart-toggle input {
   cursor: pointer;
   width: 16px;
@@ -89,6 +88,32 @@ td.chart-toggle input {
   position: relative;
   width: 100%;
   height: 430px;
+}
+.nick-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.nick-button:hover {
+  text-decoration: underline;
+}
+.position-chart-row td {
+  padding: 16px 20px;
+  background: #fff;
+  white-space: normal;
+}
+.position-chart-panel h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+.position-chart-wrap {
+  position: relative;
+  width: 100%;
+  height: 260px;
 }
 @media (max-width: 700px) {
   .chart-canvas-wrap {
@@ -189,6 +214,11 @@ const chartCanvas = document.getElementById("season-chart");
 
 let seasonChart = null;
 let seasonChartData = null;
+
+// Historia pozycji zawodników w generalce.
+let positionHistoryData = null;
+let positionChart = null;
+let expandedPositionKey = null;
 
 // Zawodnicy zaznaczeni do wyświetlania.
 let selectedPlayerKeys = new Set();
@@ -561,8 +591,10 @@ function prepareOneFile(rows, fileName, pointsTable) {
 function createPlayerTotals(allFiles) {
   const totals = new Map();
 
-  // Najpierw ustalamy wszystkich zawodników.
+  // Przechodzimy przez rundy w kolejności sezonu.
   for (const file of allFiles) {
+
+    // Najpierw dodajemy zawodników, którzy debiutują w tej rundzie.
     for (const competitor of file.competitors.values()) {
       if (!totals.has(competitor.key)) {
         totals.set(competitor.key, {
@@ -578,15 +610,12 @@ function createPlayerTotals(allFiles) {
         });
       }
     }
-  }
 
-  // Następnie przechodzimy przez wszystkie pliki.
-  for (const file of allFiles) {
+    // Następnie aktualizujemy wyniki wszystkich dotychczasowych uczestników.
     for (const [key, total] of totals) {
       const competitor = file.competitors.get(key);
 
       if (competitor) {
-        // Zawodnik wystąpił w danym typerze.
         total.bigPoints += competitor.bigPoints;
         total.smallPoints += competitor.small;
         total.appearances += 1;
@@ -602,14 +631,13 @@ function createPlayerTotals(allFiles) {
           });
         }
       } else {
-        // Zawodnik nie wystąpił.
-        // Dodajemy wartość wyliczoną dla konkretnego pliku.
-        // Nie zwiększamy liczby występów ani punktów.
+        // Uzupełniamy nieobecność tylko od momentu debiutu zawodnika.
         total.time += file.absenceTime;
       }
     }
   }
-    // Obliczamy dodatkowe statystyki zawodników.
+
+  // Obliczamy dodatkowe statystyki zawodników.
   for (const total of totals.values()) {
     total.bigPointsPerAppearance =
       total.bigPoints / total.appearances;
@@ -700,6 +728,84 @@ function buildSeasonChartData(allFiles) {
       player.smallPoints.push(total.smallPoints);
       player.time.push(total.time);
     }
+  }
+
+  return {
+    labels,
+    players
+  };
+}
+ /*
+ * HISTORIA POZYCJI W KLASYFIKACJI GENERALNEJ
+ *
+ * Każdy punkt oznacza pozycję zawodnika po danej rundzie.
+ * Zawodnik zaczyna być uwzględniany od pierwszego występu.
+ */
+function buildPositionHistory(allFiles) {
+  const players = new Map();
+  const cumulative = new Map();
+
+  const labels = allFiles.map(file => file.raceLabel);
+
+  for (let raceIndex = 0; raceIndex < allFiles.length; raceIndex++) {
+    const file = allFiles[raceIndex];
+
+    // Dodajemy zawodników debiutujących w bieżącej rundzie.
+    for (const competitor of file.competitors.values()) {
+      if (!cumulative.has(competitor.key)) {
+        cumulative.set(competitor.key, {
+          key: competitor.key,
+          nick: competitor.nick,
+          bigPoints: 0,
+          smallPoints: 0,
+          time: 0
+        });
+
+        // Przed debiutem zawodnik nie ma pozycji.
+        players.set(
+          competitor.key,
+          Array(raceIndex).fill(null)
+        );
+      }
+    }
+
+    // Aktualizujemy wyniki dotychczasowych uczestników.
+    for (const [key, total] of cumulative) {
+      const competitor = file.competitors.get(key);
+
+      if (competitor) {
+        total.bigPoints += competitor.bigPoints;
+        total.smallPoints += competitor.small;
+        total.time += competitor.time;
+      } else {
+        total.time += file.absenceTime;
+      }
+    }
+
+    // Tworzymy klasyfikację po bieżącej rundzie.
+    const ranking = [...cumulative.values()].sort((a, b) =>
+      b.bigPoints - a.bigPoints ||
+      b.smallPoints - a.smallPoints ||
+      a.time - b.time
+    );
+
+    // Zapisujemy pozycję każdego zawodnika.
+    let previous = null;
+    let position = 0;
+
+    ranking.forEach((item, index) => {
+      if (
+        !previous ||
+        item.bigPoints !== previous.bigPoints ||
+        item.smallPoints !== previous.smallPoints ||
+        item.time !== previous.time
+      ) {
+        position = index + 1;
+      }
+
+      players.get(item.key).push(position);
+      previous = item;
+    });
   }
 
   return {
@@ -1006,7 +1112,120 @@ tableHead.addEventListener("click", event => {
 
   render(currentTotals);
 });
+function appendPositionChartRow(item, mainRow) {
+  const chartRow = document.createElement("tr");
+  chartRow.className = "position-chart-row";
+
+  const cell = document.createElement("td");
+  cell.colSpan = 13;
+
+  const panel = document.createElement("div");
+  panel.className = "position-chart-panel";
+
+  const heading = document.createElement("h3");
+  heading.textContent = `Historia pozycji w generalce — ${item.nick}`;
+
+  const chartWrap = document.createElement("div");
+  chartWrap.className = "position-chart-wrap";
+
+  const canvas = document.createElement("canvas");
+
+  chartWrap.appendChild(canvas);
+  panel.appendChild(heading);
+  panel.appendChild(chartWrap);
+  cell.appendChild(panel);
+  chartRow.appendChild(cell);
+
+  bodyEl.insertBefore(chartRow, mainRow.nextSibling);
+
+  const positions = positionHistoryData?.players.get(item.key);
+
+  if (!positions || typeof Chart === "undefined") {
+    heading.textContent += " — wykres niedostępny";
+    return;
+  }
+
+  const validPositions = positions.filter(value => value !== null);
+
+  if (!validPositions.length) {
+    heading.textContent += " — brak danych";
+    return;
+  }
+
+  positionChart = new Chart(canvas, {
+    type: "line",
+
+    data: {
+      labels: positionHistoryData.labels,
+
+      datasets: [{
+        label: "Pozycja w generalce",
+        data: positions,
+
+        borderColor: "#2878b5",
+        backgroundColor: "#2878b5",
+
+        borderWidth: 2,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        tension: 0
+      }]
+    },
+
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+
+      interaction: {
+        mode: "index",
+        intersect: false
+      },
+
+      plugins: {
+        legend: {
+          display: false
+        },
+
+        tooltip: {
+          callbacks: {
+            label: context =>
+              `Pozycja: ${context.parsed.y}.`
+          }
+        }
+      },
+
+      scales: {
+        x: {
+          title: {
+            display: true,
+            text: "Runda"
+          }
+        },
+
+        y: {
+          reverse: true,
+          min: 1,
+
+          title: {
+            display: true,
+            text: "Miejsce w klasyfikacji"
+          },
+
+          ticks: {
+            stepSize: 1,
+            precision: 0
+          }
+        }
+      }
+    }
+  });
+}
 function render(totals) {
+    // Usuwamy poprzedni wykres przed ponownym renderowaniem tabeli.
+  if (positionChart) {
+    positionChart.destroy();
+    positionChart = null;
+  }
   // Najpierw ustalamy oficjalną kolejność klasyfikacji generalnej.
   const generalRows = [...totals.values()].sort((a, b) =>
     b.bigPoints - a.bigPoints ||
@@ -1036,7 +1255,12 @@ function render(totals) {
   const availableKeys = new Set(
     generalRows.map(item => item.key)
   );
-
+  if (
+    expandedPositionKey !== null &&
+    !availableKeys.has(expandedPositionKey)
+  ) {
+    expandedPositionKey = null;
+  }
   if (!chartSelectionInitialized) {
     // Przy pierwszym uruchomieniu zaznaczamy TOP 20.
     selectedPlayerKeys = new Set(
@@ -1106,13 +1330,44 @@ function render(totals) {
       { value: item.minTime === null ? "—" : formatTime(item.minTime), cls: "num" },
       { value: item.maxTime === null ? "—" : formatTime(item.maxTime), cls: "num" }
     ];
-    values.forEach(cell => {
-      const td = document.createElement("td");
-      td.className = cell.cls || "";
-      td.textContent = cell.value;
-      tr.appendChild(td);
-    });
-    bodyEl.appendChild(tr);
+      values.forEach(cell => {
+        const td = document.createElement("td");
+        td.className = cell.cls || "";
+
+        if (cell.cls === "nick") {
+          const nickButton = document.createElement("button");
+          nickButton.type = "button";
+          nickButton.className = "nick-button";
+          nickButton.textContent = item.nick;
+
+          nickButton.setAttribute(
+            "aria-expanded",
+            String(expandedPositionKey === item.key)
+          );
+
+          nickButton.addEventListener("click", () => {
+            expandedPositionKey =
+              expandedPositionKey === item.key
+                ? null
+                : item.key;
+
+            render(currentTotals);
+          });
+
+          td.appendChild(nickButton);
+        } else {
+          td.textContent = cell.value;
+        }
+
+        tr.appendChild(td);
+      });
+
+      bodyEl.appendChild(tr);
+
+      // Jeżeli zawodnik jest rozwinięty, dodajemy wykres pod jego wierszem.
+      if (expandedPositionKey === item.key) {
+        appendPositionChartRow(item, tr);
+      }
   });
   if (!rows.length) {
     bodyEl.innerHTML =
@@ -1173,6 +1428,8 @@ async function loadGeneralClassification() {
     currentTotals = createPlayerTotals(allFiles);
     // Przygotowujemy dane narastające wykresu sezonowego.
     seasonChartData = buildSeasonChartData(allFiles);
+    // Odtwarzamy pozycje zawodników po każdej rundzie.
+    positionHistoryData = buildPositionHistory(allFiles);
     // Uzupełniamy listę zawodników do porównania.
     updateComparePlayerOptions();
     // Wyświetlamy klasyfikację generalną.
