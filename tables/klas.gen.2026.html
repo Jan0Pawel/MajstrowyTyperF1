@@ -702,14 +702,18 @@ function drawSeasonChart() {
     const currentTeam = lastAppearance?.team;
     const teamColors = getTeamColors(currentTeam);
 
-    const color = teamColors?.background ?? "#667085";
+    const lineColor = teamColors?.background ?? "#667085";
+    const pointColor = teamColors?.text ?? "#667085";
 
     return {
       label: player.nick,
       data: player[metric],
 
-      borderColor: color,
-      backgroundColor: color,
+      borderColor: lineColor,
+      backgroundColor: pointColor,
+
+      pointBackgroundColor: pointColor,
+      pointBorderColor: lineColor,
 
       borderWidth: 2,
       pointRadius: 2,
