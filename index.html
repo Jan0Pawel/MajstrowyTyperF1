@@ -174,24 +174,24 @@
             }
         }
 
+        function clearGeneralClassification() {
+        
         const generalContainer = document.getElementById("general-container");
         const toggleGeneralButton = document.getElementById("toggle-general");
 
-        let generalLoaded = false;
-
         const teamsContainer = document.getElementById("teams-container");
         const toggleTeamsButton = document.getElementById("toggle-teams");
-
-        let teamsLoaded = false;
-        
-        function closeGeneralClassification() {
+    generalContainer.replaceChildren();
     generalContainer.hidden = true;
+
     toggleGeneralButton.textContent = "Pokaż klasyfikację generalną";
     toggleGeneralButton.setAttribute("aria-expanded", "false");
 }
 
-function closeTeamsClassification() {
+function clearTeamsClassification() {
+    teamsContainer.replaceChildren();
     teamsContainer.hidden = true;
+
     toggleTeamsButton.textContent = "Pokaż klasyfikację zespołów";
     toggleTeamsButton.setAttribute("aria-expanded", "false");
 }
@@ -200,29 +200,28 @@ toggleGeneralButton.addEventListener("click", async () => {
     const isVisible = !generalContainer.hidden;
 
     if (isVisible) {
-        closeGeneralClassification();
+        clearGeneralClassification();
         return;
     }
 
-    // Zamknij klasyfikację zespołów.
-    closeTeamsClassification();
+    // Całkowicie usuń klasyfikację zespołów.
+    clearTeamsClassification();
+
+    // Wyczyść poprzednią zawartość generalnej.
+    generalContainer.replaceChildren();
 
     generalContainer.hidden = false;
     toggleGeneralButton.textContent = "Ukryj klasyfikację generalną";
     toggleGeneralButton.setAttribute("aria-expanded", "true");
 
-    if (!generalLoaded) {
-        try {
-            await loadTemplate(
-                "tables/klas.gen.2026.html",
-                generalContainer
-            );
-
-            generalLoaded = true;
-        } catch (error) {
-            generalContainer.textContent = error.message;
-            console.error(error);
-        }
+    try {
+        await loadTemplate(
+            "tables/klas.gen.2026.html",
+            generalContainer
+        );
+    } catch (error) {
+        generalContainer.textContent = error.message;
+        console.error(error);
     }
 });
 
@@ -230,29 +229,28 @@ toggleTeamsButton.addEventListener("click", async () => {
     const isVisible = !teamsContainer.hidden;
 
     if (isVisible) {
-        closeTeamsClassification();
+        clearTeamsClassification();
         return;
     }
 
-    // Zamknij klasyfikację generalną.
-    closeGeneralClassification();
+    // Całkowicie usuń klasyfikację generalną.
+    clearGeneralClassification();
+
+    // Wyczyść poprzednią zawartość zespołów.
+    teamsContainer.replaceChildren();
 
     teamsContainer.hidden = false;
     toggleTeamsButton.textContent = "Ukryj klasyfikację zespołów";
     toggleTeamsButton.setAttribute("aria-expanded", "true");
 
-    if (!teamsLoaded) {
-        try {
-            await loadTemplate(
-                "tables/klas.zesp.2026.html",
-                teamsContainer
-            );
-
-            teamsLoaded = true;
-        } catch (error) {
-            teamsContainer.textContent = error.message;
-            console.error(error);
-        }
+    try {
+        await loadTemplate(
+            "tables/klas.zesp.2026.html",
+            teamsContainer
+        );
+    } catch (error) {
+        teamsContainer.textContent = error.message;
+        console.error(error);
     }
 });
         initPage();
