@@ -146,9 +146,16 @@
                         );
                     });
                 } else {
-                    script.textContent = scriptInfo.code;
-                    document.body.appendChild(script);
-                    script.remove();
+                    const isolatedScript = document.createElement("script");
+
+                    isolatedScript.textContent = `
+                        (() => {
+                            ${scriptInfo.code}
+                        })();
+                    `;
+                
+                    document.body.appendChild(isolatedScript);
+                    isolatedScript.remove();
                 }
             }
         }
