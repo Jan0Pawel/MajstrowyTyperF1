@@ -45,24 +45,6 @@
     .expanded-grid { grid-template-columns:1fr; }
     .chart-canvas-wrap { height:320px; }
   }
- .team-filters {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px 16px;
-    margin-bottom: 14px;
-  }
-
-  .team-filter {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    cursor: pointer;
-    font-size: 13px;
-  }
-
-  .team-filter input {
-    cursor: pointer;
-  }
 </style>
 <link rel="stylesheet" href="/MajstrowyTyperF1/2026/zespoły.css">
 </head>
@@ -84,7 +66,6 @@
       </select>
     </div>
 
-    <div id="team-filters" class="team-filters"></div>
     <div class="chart-canvas-wrap">
       <canvas id="season-chart"></canvas>
     </div>
@@ -94,6 +75,7 @@
     <table>
       <thead>
         <tr>
+          <th>Wykres</th>
           <th class="num" data-sort="position">Pozycja <span class="sort-indicator"></span></th>
           <th data-sort="name">Zespół <span class="sort-indicator"></span></th>
           <th class="num" data-sort="bigPoints">Duże punkty <span class="sort-indicator"></span></th>
@@ -101,7 +83,7 @@
         </tr>
       </thead>
       <tbody id="classification-body">
-        <tr><td colspan="4">Wczytywanie danych…</td></tr>
+        <tr><td colspan="5">Wczytywanie danych…</td></tr>
       </tbody>
     </table>
   </div>
@@ -128,7 +110,6 @@ const bodyEl = document.getElementById("classification-body");
 const reloadButton = document.getElementById("reload");
 const metricSelect = document.getElementById("chart-metric");
 const chartCanvas = document.getElementById("season-chart");
-const teamFiltersEl = document.getElementById("team-filters");
 
 let visibleTeamKeys = new Set();
 
@@ -483,34 +464,6 @@ function buildPositionHistory(allFiles, teams) {
 
   return { labels, teams: history };
 }
-function renderTeamFilters() {
-    teamFiltersEl.replaceChildren();
-
-    for (const team of seasonChartData.teams.values()) {
-        const label = document.createElement("label");
-        label.className = "team-filter";
-
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.checked = visibleTeamKeys.has(team.key);
-
-        checkbox.addEventListener("change", () => {
-            if (checkbox.checked) {
-                visibleTeamKeys.add(team.key);
-            } else {
-                visibleTeamKeys.delete(team.key);
-            }
-
-            drawSeasonChart();
-        });
-
-        const name = document.createElement("span");
-        name.textContent = team.name;
-
-        label.append(checkbox, name);
-        teamFiltersEl.appendChild(label);
-    }
-}
 function drawSeasonChart() {
   if (!seasonChartData || typeof Chart === "undefined") return;
 
@@ -568,7 +521,7 @@ function appendExpandedRow(team, mainRow) {
   const row = document.createElement("tr");
   row.className = "expanded-row";
   const cell = document.createElement("td");
-  cell.colSpan = 4;
+  cell.colSpan = 5;
 
   const grid = document.createElement("div");
   grid.className = "expanded-grid";
@@ -755,6 +708,23 @@ function render(teams) {
       tr.style.backgroundColor = teamColors.background;
       tr.style.color = teamColors.text;
     }
+    const chartTd = document.createElement("td");
+    const chartCheckbox = document.createElement("input");
+
+    chartCheckbox.type = "checkbox";
+    chartCheckbox.checked = visibleTeamKeys.has(team.key);
+
+    chartCheckbox.addEventListener("change", () => {
+        if (chartCheckbox.checked) {
+            visibleTeamKeys.add(team.key);
+        } else {
+            visibleTeamKeys.delete(team.key);
+        }
+
+        drawSeasonChart();
+    });
+
+    chartTd.appendChild(chartCheckbox);
 
     const positionTd = document.createElement("td");
     positionTd.className = "num";
@@ -780,14 +750,14 @@ function render(teams) {
     smallTd.className = "num";
     smallTd.textContent = formatNumber(team.smallPoints);
 
-    tr.append(positionTd, nameTd, bigTd, smallTd);
+    tr.append(chartTd, positionTd, nameTd, bigTd, smallTd);
     bodyEl.appendChild(tr);
 
     if (expandedTeamKey === team.key) appendExpandedRow(team, tr);
   }
 
   if (!generalRows.length) {
-    bodyEl.innerHTML = '<tr><td colspan="4">Brak wyników do wyświetlenia.</td></tr>';
+    bodyEl.innerHTML = '<tr><td colspan="5">Brak wyników do wyświetlenia.</td></tr>';
   }
   updateSortIndicators();
 }
@@ -796,7 +766,7 @@ async function loadTeamClassification() {
   reloadButton.disabled = true;
   statusEl.className = "";
   statusEl.textContent = "Pobieranie plików CSV…";
-  bodyEl.innerHTML = '<tr><td colspan="4">Wczytywanie danych…</td></tr>';
+  bodyEl.innerHTML = '<tr><td colspan="5">Wczytywanie danych…</td></tr>';
 
   try {
     const [files, pointsTable] = await Promise.all([listTyperFiles(), loadPoints()]);
@@ -826,7 +796,6 @@ async function loadTeamClassification() {
 
     visibleTeamKeys = new Set(seasonChartData.teams.keys());
 
-    renderTeamFilters();
     render(teamTotals);
 
     if (typeof Chart !== "undefined") {
@@ -839,7 +808,7 @@ async function loadTeamClassification() {
     console.error(error);
     statusEl.className = "error";
     statusEl.textContent = error.message || "Wystąpił błąd podczas wczytywania klasyfikacji.";
-    bodyEl.innerHTML = '<tr><td colspan="4">Nie udało się wczytać klasyfikacji. Szczegóły znajdują się powyżej.</td></tr>';
+    bodyEl.innerHTML = '<tr><td colspan="5">Nie udało się wczytać klasyfikacji. Szczegóły znajdują się powyżej.</td></tr>';
   } finally {
     reloadButton.disabled = false;
   }
