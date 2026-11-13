@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Statystyki majstrowych typerów</title>
+    <title>Statystyki majstrowego typera</title>
 
     <style>
         body {
@@ -174,8 +174,7 @@
             }
         }
 
-        function clearGeneralClassification() {
-               const generalContainer = document.getElementById("general-container");
+        const generalContainer = document.getElementById("general-container");
         const toggleGeneralButton = document.getElementById("toggle-general");
 
         const teamsContainer = document.getElementById("teams-container");
@@ -204,7 +203,6 @@
             }
 
             clearTeamsClassification();
-            generalContainer.replaceChildren();
 
             generalContainer.hidden = false;
             toggleGeneralButton.textContent = "Ukryj klasyfikację generalną";
@@ -228,7 +226,6 @@
             }
 
             clearGeneralClassification();
-            teamsContainer.replaceChildren();
 
             teamsContainer.hidden = false;
             toggleTeamsButton.textContent = "Ukryj klasyfikację zespołów";
@@ -243,7 +240,7 @@
                 teamsContainer.textContent = error.message;
                 console.error(error);
             }
-        }); 
+        });
         initPage();
     </script>
 
