@@ -45,6 +45,24 @@
     .expanded-grid { grid-template-columns:1fr; }
     .chart-canvas-wrap { height:320px; }
   }
+ .team-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    margin-bottom: 14px;
+  }
+
+  .team-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+
+  .team-filter input {
+    cursor: pointer;
+  }
 </style>
 <link rel="stylesheet" href="/MajstrowyTyperF1/2026/zespoły.css">
 </head>
@@ -61,10 +79,12 @@
     <div class="chart-toolbar">
       <label for="chart-metric">Wyświetlana statystyka:</label>
       <select id="chart-metric">
-        <option value="bigPoints">Duże punkty</option>
-        <option value="smallPoints">Małe punkty</option>
+          <option value="bigPoints">Duże punkty</option>
+          <option value="smallPoints">Małe punkty</option>
       </select>
     </div>
+
+    <div id="team-filters" class="team-filters"></div>
     <div class="chart-canvas-wrap">
       <canvas id="season-chart"></canvas>
     </div>
@@ -108,6 +128,9 @@ const bodyEl = document.getElementById("classification-body");
 const reloadButton = document.getElementById("reload");
 const metricSelect = document.getElementById("chart-metric");
 const chartCanvas = document.getElementById("season-chart");
+const teamFiltersEl = document.getElementById("team-filters");
+
+let visibleTeamKeys = new Set();
 
 let teamTotals = new Map();
 let seasonChartData = null;
@@ -118,7 +141,15 @@ let expandedTeamKey = null;
 let sortState = { key: null, direction: 1 };
 
 function normalizeTeam(value) {
-  return String(value ?? "").trim().replace(/\s+/g, " ").toLocaleLowerCase("pl-PL");
+    const team = String(value ?? "")
+        .trim()
+        .replace(/\s+/g, " ");
+
+    if (!team || team.toLocaleUpperCase("pl-PL") === "N/A") {
+        return "";
+    }
+
+    return team.toLocaleLowerCase("pl-PL");
 }
 
 function normalizeNick(value) {
@@ -326,8 +357,8 @@ function createTeamTotals(allFiles) {
 
   for (const file of allFiles) {
     for (const competitor of file.competitors) {
-      if (!competitor.team) continue;
       const key = normalizeTeam(competitor.team);
+      if (!key) continue;
       if (!teams.has(key)) {
         teams.set(key, {
           key,
@@ -347,13 +378,15 @@ function createTeamTotals(allFiles) {
         team.drivers.set(driverKey, {
           nick: competitor.nick,
           bigPoints: 0,
-          smallPoints: 0
+          smallPoints: 0,
+          appearances: 0
         });
       }
 
       const driver = team.drivers.get(driverKey);
       driver.bigPoints += competitor.bigPoints;
       driver.smallPoints += competitor.small;
+      driver.appearances++;
     }
   }
 
@@ -379,8 +412,8 @@ function buildSeasonChartData(allFiles, teams) {
     labels.push(file.raceLabel);
 
     for (const competitor of file.competitors) {
-      if (!competitor.team) continue;
       const key = normalizeTeam(competitor.team);
+      if (!key) continue;
       const total = cumulative.get(key);
       total.bigPoints += competitor.bigPoints;
       total.smallPoints += competitor.small;
@@ -408,8 +441,8 @@ function buildPositionHistory(allFiles, teams) {
     // Zespół pojawia się w historii dopiero od rundy, w której
     // po raz pierwszy wystąpił w danych.
     for (const competitor of file.competitors) {
-      if (!competitor.team) continue;
       const key = normalizeTeam(competitor.team);
+      if (!key) continue;
       if (!cumulative.has(key)) {
         const teamInfo = teams.get(key);
         cumulative.set(key, {
@@ -423,8 +456,10 @@ function buildPositionHistory(allFiles, teams) {
     }
 
     for (const competitor of file.competitors) {
-      if (!competitor.team) continue;
-      const total = cumulative.get(normalizeTeam(competitor.team));
+      const key = normalizeTeam(competitor.team);
+      if (!key) continue;
+
+      const total = cumulative.get(key);
       total.bigPoints += competitor.bigPoints;
       total.smallPoints += competitor.small;
     }
@@ -448,12 +483,41 @@ function buildPositionHistory(allFiles, teams) {
 
   return { labels, teams: history };
 }
+function renderTeamFilters() {
+    teamFiltersEl.replaceChildren();
 
+    for (const team of seasonChartData.teams.values()) {
+        const label = document.createElement("label");
+        label.className = "team-filter";
+
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = visibleTeamKeys.has(team.key);
+
+        checkbox.addEventListener("change", () => {
+            if (checkbox.checked) {
+                visibleTeamKeys.add(team.key);
+            } else {
+                visibleTeamKeys.delete(team.key);
+            }
+
+            drawSeasonChart();
+        });
+
+        const name = document.createElement("span");
+        name.textContent = team.name;
+
+        label.append(checkbox, name);
+        teamFiltersEl.appendChild(label);
+    }
+}
 function drawSeasonChart() {
   if (!seasonChartData || typeof Chart === "undefined") return;
 
   const metric = metricSelect.value;
-  const datasets = [...seasonChartData.teams.values()].map(team => {
+  const datasets = [...seasonChartData.teams.values()]
+    .filter(team => visibleTeamKeys.has(team.key))
+    .map(team => {
     const colors = getTeamColors(team.name);
     return {
       label: team.name,
@@ -529,6 +593,7 @@ function appendExpandedRow(team, mainRow) {
   table.innerHTML = `
     <thead><tr>
       <th>Zawodnik</th>
+      <th class="num">Występy</th>
       <th class="num">Duże punkty</th>
       <th class="num">Małe punkty</th>
     </tr></thead>
@@ -545,13 +610,18 @@ function appendExpandedRow(team, mainRow) {
     const tr = document.createElement("tr");
     const nick = document.createElement("td");
     nick.textContent = driver.nick;
+
+    const appearances = document.createElement("td");
+    appearances.className = "num";
+    appearances.textContent = driver.appearances;
+
     const big = document.createElement("td");
     big.className = "num";
     big.textContent = formatNumber(driver.bigPoints);
     const small = document.createElement("td");
     small.className = "num";
     small.textContent = formatNumber(driver.smallPoints);
-    tr.append(nick, big, small);
+    tr.append(nick, appearances, big, small);
     tbody.appendChild(tr);
   }
 
@@ -753,6 +823,10 @@ async function loadTeamClassification() {
     teamTotals = createTeamTotals(allFiles);
     seasonChartData = buildSeasonChartData(allFiles, teamTotals);
     positionHistoryData = buildPositionHistory(allFiles, teamTotals);
+
+    visibleTeamKeys = new Set(seasonChartData.teams.keys());
+
+    renderTeamFilters();
     render(teamTotals);
 
     if (typeof Chart !== "undefined") {
