@@ -42,6 +42,13 @@
         #general-container[hidden] {
             display: none;
         }
+        #teams-container {
+            margin-bottom: 30px;
+        }
+
+        #teams-container[hidden] {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -56,9 +63,19 @@
         >
             Pokaż klasyfikację generalną
         </button>
+    
+        <button
+            id="toggle-teams"
+            type="button"
+            aria-expanded="false"
+        >
+            Pokaż klasyfikację zespołów
+        </button>
     </div>
 
     <section id="general-container" hidden></section>
+
+    <section id="teams-container" hidden></section>
 
     <main id="tables-container">
         <p>Wczytywanie tabeli...</p>
@@ -142,6 +159,11 @@
 
         let generalLoaded = false;
 
+        const teamsContainer = document.getElementById("teams-container");
+        const toggleTeamsButton = document.getElementById("toggle-teams");
+
+        let teamsLoaded = false;
+        
         toggleGeneralButton.addEventListener("click", async () => {
             const isVisible = !generalContainer.hidden;
 
@@ -170,7 +192,34 @@
                 }
             }
         });
+        toggleTeamsButton.addEventListener("click", async () => {
+            const isVisible = !teamsContainer.hidden;
 
+           if (isVisible) {
+                teamsContainer.hidden = true;
+                toggleTeamsButton.textContent = "Pokaż klasyfikację zespołów";
+                toggleTeamsButton.setAttribute("aria-expanded", "false");
+                return;
+            }
+
+            teamsContainer.hidden = false;
+            toggleTeamsButton.textContent = "Ukryj klasyfikację zespołów";
+            toggleTeamsButton.setAttribute("aria-expanded", "true");
+
+            if (!teamsLoaded) {
+                try {
+                    await loadTemplate(
+                        "tables/klas.zesp.2026.html",
+                        teamsContainer
+                    );
+
+                    teamsLoaded = true;
+                } catch (error) {
+                    teamsContainer.textContent = error.message;
+                    console.error(error);
+                }
+            }
+        });
         initPage();
     </script>
 
