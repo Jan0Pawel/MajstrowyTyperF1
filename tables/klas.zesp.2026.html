@@ -64,6 +64,10 @@
           <option value="bigPoints">Duże punkty</option>
           <option value="smallPoints">Małe punkty</option>
       </select>
+      <label for="chart-compare-team">Porównaj z zespołem:</label>
+      <select id="chart-compare-team">
+        <option value="">Brak porównania</option>
+      </select>
     </div>
 
     <div class="chart-canvas-wrap">
@@ -109,6 +113,7 @@ const statusEl = document.getElementById("status");
 const bodyEl = document.getElementById("classification-body");
 const reloadButton = document.getElementById("reload");
 const metricSelect = document.getElementById("chart-metric");
+const compareTeamSelect = document.getElementById("chart-compare-team");
 const chartCanvas = document.getElementById("season-chart");
 
 let visibleTeamKeys = new Set();
@@ -464,27 +469,79 @@ function buildPositionHistory(allFiles, teams) {
 
   return { labels, teams: history };
 }
+function populateTeamComparisonSelect() {
+  const previousValue = compareTeamSelect.value;
+
+  compareTeamSelect.replaceChildren();
+
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  defaultOption.textContent = "Brak porównania";
+  compareTeamSelect.appendChild(defaultOption);
+
+  const teams = [...seasonChartData.teams.values()].sort((a, b) =>
+    a.name.localeCompare(b.name, "pl", { sensitivity: "base" })
+  );
+
+  for (const team of teams) {
+    const option = document.createElement("option");
+    option.value = team.key;
+    option.textContent = team.name;
+    compareTeamSelect.appendChild(option);
+  }
+
+  if (teams.some(team => team.key === previousValue)) {
+    compareTeamSelect.value = previousValue;
+  } else {
+    compareTeamSelect.value = "";
+  }
+}
 function drawSeasonChart() {
   if (!seasonChartData || typeof Chart === "undefined") return;
 
   const metric = metricSelect.value;
+  const referenceKey = compareTeamSelect.value;
+  const referenceTeam = referenceKey
+    ? seasonChartData.teams.get(referenceKey)
+    : null;
+
   const datasets = [...seasonChartData.teams.values()]
-    .filter(team => visibleTeamKeys.has(team.key))
+    .filter(team =>
+      visibleTeamKeys.has(team.key) ||
+      team.key === referenceTeam?.key
+    )
     .map(team => {
-    const colors = getTeamColors(team.name);
-    return {
-      label: team.name,
-      data: team[metric],
-      borderColor: colors?.background ?? "#667085",
-      backgroundColor: colors?.text ?? "#667085",
-      pointBackgroundColor: colors?.text ?? "#667085",
-      borderWidth: 2,
-      pointRadius: 2,
-      pointHoverRadius: 5,
-      tension: 0.15,
-      fill: false
-    };
-  });
+      const colors = getTeamColors(team.name);
+      const isReference = team.key === referenceTeam?.key;
+
+      const data = referenceTeam
+        ? team[metric].map((value, index) =>
+            value - referenceTeam[metric][index]
+          )
+        : team[metric];
+
+      return {
+        label: isReference
+          ? `${team.name} (punkt odniesienia)`
+          : team.name,
+        data,
+        borderColor: isReference
+          ? "#202a36"
+          : colors?.background ?? "#667085",
+        backgroundColor: isReference
+          ? "#202a36"
+          : colors?.text ?? "#667085",
+        pointBackgroundColor: isReference
+          ? "#202a36"
+          : colors?.text ?? "#667085",
+        borderDash: isReference ? [6, 4] : [],
+        borderWidth: 2,
+        pointRadius: isReference ? 0 : 2,
+        pointHoverRadius: isReference ? 0 : 5,
+        tension: 0.15,
+        fill: false
+      };
+    });
 
   if (seasonChart) seasonChart.destroy();
 
@@ -499,17 +556,24 @@ function drawSeasonChart() {
         legend: { display: true, position: "bottom" },
         tooltip: {
           callbacks: {
-            label: context => `${context.dataset.label}: ${formatNumber(context.parsed.y)}`
+            label: context =>
+              `${context.dataset.label}: ${formatNumber(context.parsed.y)}`
           }
         }
       },
       scales: {
         x: { title: { display: true, text: "Runda" } },
         y: {
-          beginAtZero: true,
+          beginAtZero: !referenceTeam,
           title: {
             display: true,
-            text: metric === "bigPoints" ? "Duże punkty – suma narastająca" : "Małe punkty – suma narastająca"
+            text: referenceTeam
+              ? (metric === "bigPoints"
+                  ? `Różnica dużych punktów względem ${referenceTeam.name}`
+                  : `Różnica małych punktów względem ${referenceTeam.name}`)
+              : (metric === "bigPoints"
+                  ? "Duże punkty – suma narastająca"
+                  : "Małe punkty – suma narastająca")
           }
         }
       }
@@ -796,6 +860,8 @@ async function loadTeamClassification() {
 
     visibleTeamKeys = new Set(seasonChartData.teams.keys());
 
+    populateTeamComparisonSelect();
+
     render(teamTotals);
 
     if (typeof Chart !== "undefined") {
@@ -815,6 +881,7 @@ async function loadTeamClassification() {
 }
 
 metricSelect.addEventListener("change", drawSeasonChart);
+compareTeamSelect.addEventListener("change", drawSeasonChart);
 reloadButton.addEventListener("click", loadTeamClassification);
 loadTeamClassification();
 </script>
