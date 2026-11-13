@@ -175,84 +175,75 @@
         }
 
         function clearGeneralClassification() {
-        
-        const generalContainer = document.getElementById("general-container");
+               const generalContainer = document.getElementById("general-container");
         const toggleGeneralButton = document.getElementById("toggle-general");
 
         const teamsContainer = document.getElementById("teams-container");
         const toggleTeamsButton = document.getElementById("toggle-teams");
-    generalContainer.replaceChildren();
-    generalContainer.hidden = true;
 
-    toggleGeneralButton.textContent = "Pokaż klasyfikację generalną";
-    toggleGeneralButton.setAttribute("aria-expanded", "false");
-}
+        function clearGeneralClassification() {
+            generalContainer.replaceChildren();
+            generalContainer.hidden = true;
 
-function clearTeamsClassification() {
-    teamsContainer.replaceChildren();
-    teamsContainer.hidden = true;
+            toggleGeneralButton.textContent = "Pokaż klasyfikację generalną";
+            toggleGeneralButton.setAttribute("aria-expanded", "false");
+        }
 
-    toggleTeamsButton.textContent = "Pokaż klasyfikację zespołów";
-    toggleTeamsButton.setAttribute("aria-expanded", "false");
-}
+        function clearTeamsClassification() {
+            teamsContainer.replaceChildren();
+            teamsContainer.hidden = true;
 
-toggleGeneralButton.addEventListener("click", async () => {
-    const isVisible = !generalContainer.hidden;
+            toggleTeamsButton.textContent = "Pokaż klasyfikację zespołów";
+            toggleTeamsButton.setAttribute("aria-expanded", "false");
+        }
 
-    if (isVisible) {
-        clearGeneralClassification();
-        return;
-    }
+        toggleGeneralButton.addEventListener("click", async () => {
+            if (!generalContainer.hidden) {
+                clearGeneralClassification();
+                return;
+            }
 
-    // Całkowicie usuń klasyfikację zespołów.
-    clearTeamsClassification();
+            clearTeamsClassification();
+            generalContainer.replaceChildren();
 
-    // Wyczyść poprzednią zawartość generalnej.
-    generalContainer.replaceChildren();
+            generalContainer.hidden = false;
+            toggleGeneralButton.textContent = "Ukryj klasyfikację generalną";
+            toggleGeneralButton.setAttribute("aria-expanded", "true");
 
-    generalContainer.hidden = false;
-    toggleGeneralButton.textContent = "Ukryj klasyfikację generalną";
-    toggleGeneralButton.setAttribute("aria-expanded", "true");
+            try {
+                await loadTemplate(
+                    "tables/klas.gen.2026.html",
+                    generalContainer
+                );
+            } catch (error) {
+                generalContainer.textContent = error.message;
+                console.error(error);
+            }
+        });
 
-    try {
-        await loadTemplate(
-            "tables/klas.gen.2026.html",
-            generalContainer
-        );
-    } catch (error) {
-        generalContainer.textContent = error.message;
-        console.error(error);
-    }
-});
+        toggleTeamsButton.addEventListener("click", async () => {
+            if (!teamsContainer.hidden) {
+                clearTeamsClassification();
+                return;
+            }
 
-toggleTeamsButton.addEventListener("click", async () => {
-    const isVisible = !teamsContainer.hidden;
+            clearGeneralClassification();
+            teamsContainer.replaceChildren();
 
-    if (isVisible) {
-        clearTeamsClassification();
-        return;
-    }
+            teamsContainer.hidden = false;
+            toggleTeamsButton.textContent = "Ukryj klasyfikację zespołów";
+            toggleTeamsButton.setAttribute("aria-expanded", "true");
 
-    // Całkowicie usuń klasyfikację generalną.
-    clearGeneralClassification();
-
-    // Wyczyść poprzednią zawartość zespołów.
-    teamsContainer.replaceChildren();
-
-    teamsContainer.hidden = false;
-    toggleTeamsButton.textContent = "Ukryj klasyfikację zespołów";
-    toggleTeamsButton.setAttribute("aria-expanded", "true");
-
-    try {
-        await loadTemplate(
-            "tables/klas.zesp.2026.html",
-            teamsContainer
-        );
-    } catch (error) {
-        teamsContainer.textContent = error.message;
-        console.error(error);
-    }
-});
+            try {
+                await loadTemplate(
+                    "tables/klas.zesp.2026.html",
+                    teamsContainer
+                );
+            } catch (error) {
+                teamsContainer.textContent = error.message;
+                console.error(error);
+            }
+        }); 
         initPage();
     </script>
 
