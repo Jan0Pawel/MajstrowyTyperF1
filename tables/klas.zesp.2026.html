@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Klasyfikacja zespołów 2026</title>
+<style>
+  :root { color-scheme: light; --border:#d7dce2; --head:#202a36; --muted:#667085; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:20px; font:14px/1.45 Arial,sans-serif; color:#20242a; background:#f5f6f8; }
+  .wrap { max-width:1200px; margin:auto; }
+  h1 { margin:0 0 14px; font-size:25px; }
+  h2 { margin:0 0 14px; font-size:19px; }
+  h3 { margin:0 0 12px; font-size:16px; }
+  .toolbar, .chart-toolbar { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-bottom:14px; }
+  button { border:0; border-radius:5px; padding:9px 14px; background:#26384b; color:white; cursor:pointer; }
+  button:disabled { opacity:.55; cursor:wait; }
+  #status { color:var(--muted); }
+  .error { color:#a12626 !important; }
+  .chart-panel { margin-bottom:20px; padding:16px; background:white; border:1px solid var(--border); border-radius:7px; }
+  .chart-toolbar label { font-weight:600; }
+  .chart-toolbar select { padding:8px; border:1px solid var(--border); border-radius:5px; background:white; font:inherit; }
+  .chart-canvas-wrap { position:relative; width:100%; height:390px; }
+  .table-wrap { overflow:auto; background:white; border:1px solid var(--border); border-radius:7px; }
+  table { width:100%; border-collapse:collapse; min-width:600px; }
+  th,td { padding:9px 11px; border-bottom:1px solid #e7e9ed; text-align:left; white-space:nowrap; }
+  th { position:sticky; top:0; z-index:1; background:var(--head); color:white; font-weight:600; }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  tbody tr:nth-child(even) { background:#f8f9fb; }
+  tbody tr:hover { background:#edf3f8; }
+  th[data-sort] { cursor:pointer; user-select:none; }
+  th[data-sort]:hover { background:#34485e; }
+  .sort-indicator { display:inline-block; margin-left:4px; color:#aebdce; font-size:11px; }
+  th[data-sort].active-sort .sort-indicator { color:white; }
+  .team-button { border:0; padding:0; background:transparent; color:inherit; font:inherit; font-weight:600; cursor:pointer; }
+  .team-button:hover { text-decoration:underline; }
+  .expanded-row td { padding:16px 20px; background:#fff; white-space:normal; }
+  .expanded-grid { display:grid; grid-template-columns:minmax(300px, 1.2fr) minmax(300px, 1fr); gap:22px; align-items:start; }
+  .position-chart-wrap { position:relative; width:100%; height:260px; }
+  .contribution-table { min-width:0; width:100%; }
+  .contribution-table th { position:static; }
+  .sub { margin:12px 0 0; color:var(--muted); font-size:12px; }
+  @media (max-width:800px) {
+    body { padding:12px; }
+    .expanded-grid { grid-template-columns:1fr; }
+    .chart-canvas-wrap { height:320px; }
+  }
+</style>
+<link rel="stylesheet" href="/MajstrowyTyperF1/2026/zespoły.css">
+</head>
+<body>
+<div class="wrap">
+  <h1>Klasyfikacja zespołów 2026</h1>
+  <div class="toolbar">
+    <button id="reload" type="button">Odśwież wyniki</button>
+    <span id="status">Oczekiwanie na dane…</span>
+  </div>
+
+  <div class="chart-panel">
+    <h2>Przebieg sezonu</h2>
+    <div class="chart-toolbar">
+      <label for="chart-metric">Wyświetlana statystyka:</label>
+      <select id="chart-metric">
+        <option value="bigPoints">Duże punkty</option>
+        <option value="smallPoints">Małe punkty</option>
+      </select>
+    </div>
+    <div class="chart-canvas-wrap">
+      <canvas id="season-chart"></canvas>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="num" data-sort="position">Pozycja <span class="sort-indicator"></span></th>
+          <th data-sort="name">Zespół <span class="sort-indicator"></span></th>
+          <th class="num" data-sort="bigPoints">Duże punkty <span class="sort-indicator"></span></th>
+          <th class="num" data-sort="smallPoints">Małe punkty <span class="sort-indicator"></span></th>
+        </tr>
+      </thead>
+      <tbody id="classification-body">
+        <tr><td colspan="4">Wczytywanie danych…</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="sub">
+    Punkty są przypisywane do zespołu reprezentowanego przez zawodnika w danej rundzie.
+    Zmiana zespołu nie przenosi wcześniejszych punktów zawodnika.
+  </p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+"use strict";
+
+const REPO_API = "https://api.github.com/repos/Jan0Pawel/MajstrowyTyperF1/contents/2026/typy";
+const POINTS_FILE = "punktacja.csv";
+
+// Te same aliasy nicków co w klasyfikacji zawodników.
+const NICK_ALIASES = {
+  // "nick po zmianie": "nick kanoniczny"
+};
+
+const statusEl = document.getElementById("status");
+const bodyEl = document.getElementById("classification-body");
+const reloadButton = document.getElementById("reload");
+const metricSelect = document.getElementById("chart-metric");
+const chartCanvas = document.getElementById("season-chart");
+
+let teamTotals = new Map();
+let seasonChartData = null;
+let positionHistoryData = null;
+let seasonChart = null;
+let positionChart = null;
+let expandedTeamKey = null;
+let sortState = { key: null, direction: 1 };
+
+function normalizeTeam(value) {
+  return String(value ?? "").trim().replace(/\s+/g, " ").toLocaleLowerCase("pl-PL");
+}
+
+function normalizeNick(value) {
+  const nick = String(value ?? "").trim().replace(/\s+/g, " ");
+  const lower = nick.toLocaleLowerCase("pl-PL");
+  return NICK_ALIASES[lower]
+    ? String(NICK_ALIASES[lower]).trim().replace(/\s+/g, " ").toLocaleLowerCase("pl-PL")
+    : lower;
+}
+
+function parseCSV(text) {
+  const rows = [];
+  let row = [], field = "", quoted = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+
+    if (quoted) {
+      if (char === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          quoted = false;
+        }
+      } else {
+        field += char;
+      }
+    } else if (char === '"') {
+      quoted = true;
+    } else if (char === ";") {
+      row.push(field);
+      field = "";
+    } else if (char === "\n") {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+    } else if (char !== "\r") {
+      field += char;
+    }
+  }
+
+  if (field.length || row.length) {
+    row.push(field);
+    rows.push(row);
+  }
+
+  if (!rows.length) return [];
+  const headers = rows.shift().map(h => h.trim().replace(/^\uFEFF/, ""));
+
+  return rows
+    .filter(r => r.some(v => String(v).trim() !== ""))
+    .map(r => Object.fromEntries(
+      headers.map((h, i) => [h, (r[i] ?? "").trim()])
+    ));
+}
+
+function numberValue(value) {
+  if (value === null || value === undefined || String(value).trim() === "") return 0;
+  const n = Number(String(value).trim().replace(/\s/g, "").replace(",", "."));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function parseTimeValue(value) {
+  const s = String(value ?? "").trim().replace(",", ".");
+  if (!s) return null;
+  if (/^-?\d+(?:\.\d+)?$/.test(s)) return Number(s);
+
+  const parts = s.split(":");
+  if (parts.length === 2 || parts.length === 3) {
+    const nums = parts.map(Number);
+    if (nums.every(Number.isFinite)) {
+      return parts.length === 3
+        ? nums[0] * 3600 + nums[1] * 60 + nums[2]
+        : nums[0] * 60 + nums[1];
+    }
+  }
+  throw new Error(`Nieprawidłowa wartość różnicy czasu: "${value}".`);
+}
+
+function calculatePercentile(values, percentile) {
+  if (!values.length) throw new Error("Brak prawidłowych wartości różnicy czasu do obliczenia percentyla.");
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = (sorted.length - 1) * percentile;
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) return sorted[lower];
+  return sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower);
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat("pl-PL", { maximumFractionDigits: 3 }).format(value);
+}
+
+function getTeamColors(team) {
+  if (!team) return null;
+  const styles = getComputedStyle(document.documentElement);
+  const background = styles.getPropertyValue(`--team-${team}-bg`).trim();
+  const text = styles.getPropertyValue(`--team-${team}-text`).trim();
+  return background && text ? { background, text } : null;
+}
+
+function parseRaceFileName(fileName) {
+  const match = String(fileName).match(/^(\d+)\s*-\s*(.+)\.csv$/i);
+  if (!match) {
+    throw new Error(`Nieprawidłowa nazwa pliku wyścigu: ${fileName}. Oczekiwany format: numer - lokalizacja.csv`);
+  }
+  return { raceNumber: Number(match[1]), raceLabel: `${match[1]} - ${match[2].trim()}` };
+}
+
+async function fetchText(url) {
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Błąd pobierania ${url}: HTTP ${response.status}`);
+  return response.text();
+}
+
+async function loadPoints() {
+  const rows = parseCSV(await fetchText(POINTS_FILE));
+  const points = new Map();
+
+  for (const row of rows) {
+    const position = Math.trunc(numberValue(row.Pozycja));
+    const value = numberValue(row.Punkty);
+    if (position > 0) points.set(position, value);
+  }
+
+  if (!points.size) throw new Error("Nie udało się odczytać punktacji z punktacja.csv.");
+  return points;
+}
+
+async function listTyperFiles() {
+  const response = await fetch(REPO_API, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Nie udało się pobrać listy typerów: HTTP ${response.status}`);
+  const files = await response.json();
+  return files.filter(file => file.type === "file" && /\.csv$/i.test(file.name));
+}
+
+function prepareOneFile(rows, fileName, pointsTable) {
+  const required = ["Nick", "Team", "SUMA", "Róż. czasu"];
+  if (!rows.length || required.some(key => !(key in rows[0]))) {
+    throw new Error(`Plik ${fileName} nie zawiera wymaganych kolumn: ${required.join(", ")}.`);
+  }
+
+  const competitors = rows
+    .filter(row => String(row.Nick ?? "").trim() !== "")
+    .map(row => {
+      const rawTime = String(row["Róż. czasu"] ?? "").trim();
+      let parsedTime;
+      try {
+        parsedTime = parseTimeValue(rawTime);
+      } catch (error) {
+        throw new Error(`Plik ${fileName}, zawodnik ${row.Nick}: ${error.message}`);
+      }
+      return {
+        nick: String(row.Nick).trim().replace(/\s+/g, " "),
+        team: String(row.Team ?? "").trim().replace(/\s+/g, " "),
+        small: numberValue(row.SUMA),
+        time: parsedTime ?? 0,
+        percentileTime: parsedTime
+      };
+    });
+
+  const seenNicks = new Set();
+  for (const competitor of competitors) {
+    const key = normalizeNick(competitor.nick);
+    if (seenNicks.has(key)) {
+      throw new Error(`Powielony nick "${competitor.nick}" w pliku ${fileName}.`);
+    }
+    seenNicks.add(key);
+  }
+
+  competitors.sort((a, b) => b.small - a.small || a.time - b.time);
+
+  let previous = null;
+  let currentPosition = 0;
+  competitors.forEach((competitor, index) => {
+    if (!previous || competitor.small !== previous.small || competitor.time !== previous.time) {
+      currentPosition = index + 1;
+    }
+    previous = competitor;
+    competitor.bigPoints = pointsTable.get(currentPosition) ?? 0;
+  });
+
+  const availableTimes = competitors
+    .map(competitor => competitor.percentileTime)
+    .filter(value => value !== null);
+
+  if (!availableTimes.length) {
+    throw new Error(`Plik ${fileName}: brak dostępnych wartości w kolumnie "Róż. czasu". Nie można obliczyć P85.`);
+  }
+
+  const raceInfo = parseRaceFileName(fileName);
+  return {
+    fileName,
+    raceNumber: raceInfo.raceNumber,
+    raceLabel: raceInfo.raceLabel,
+    competitors
+  };
+}
+
+/* Agregacja dorobku zespołów oraz indywidualnego wkładu kierowców. */
+function createTeamTotals(allFiles) {
+  const teams = new Map();
+
+  for (const file of allFiles) {
+    for (const competitor of file.competitors) {
+      if (!competitor.team) continue;
+      const key = normalizeTeam(competitor.team);
+      if (!teams.has(key)) {
+        teams.set(key, {
+          key,
+          name: competitor.team,
+          bigPoints: 0,
+          smallPoints: 0,
+          drivers: new Map()
+        });
+      }
+
+      const team = teams.get(key);
+      team.bigPoints += competitor.bigPoints;
+      team.smallPoints += competitor.small;
+
+      const driverKey = normalizeNick(competitor.nick);
+      if (!team.drivers.has(driverKey)) {
+        team.drivers.set(driverKey, {
+          nick: competitor.nick,
+          bigPoints: 0,
+          smallPoints: 0
+        });
+      }
+
+      const driver = team.drivers.get(driverKey);
+      driver.bigPoints += competitor.bigPoints;
+      driver.smallPoints += competitor.small;
+    }
+  }
+
+  return teams;
+}
+
+/* Narastające punkty zespołów po kolejnych rundach. */
+function buildSeasonChartData(allFiles, teams) {
+  const cumulative = new Map(
+    [...teams.keys()].map(key => [key, { bigPoints: 0, smallPoints: 0 }])
+  );
+  const series = new Map(
+    [...teams.values()].map(team => [team.key, {
+      key: team.key,
+      name: team.name,
+      bigPoints: [],
+      smallPoints: []
+    }])
+  );
+  const labels = [];
+
+  for (const file of allFiles) {
+    labels.push(file.raceLabel);
+
+    for (const competitor of file.competitors) {
+      if (!competitor.team) continue;
+      const key = normalizeTeam(competitor.team);
+      const total = cumulative.get(key);
+      total.bigPoints += competitor.bigPoints;
+      total.smallPoints += competitor.small;
+    }
+
+    for (const [key, total] of cumulative) {
+      series.get(key).bigPoints.push(total.bigPoints);
+      series.get(key).smallPoints.push(total.smallPoints);
+    }
+  }
+
+  return { labels, teams: series };
+}
+
+/* Historia pozycji zespołów po każdej rundzie. */
+function buildPositionHistory(allFiles, teams) {
+  const cumulative = new Map();
+  const history = new Map([...teams.keys()].map(key => [key, []]));
+  const labels = [];
+
+  for (let raceIndex = 0; raceIndex < allFiles.length; raceIndex++) {
+    const file = allFiles[raceIndex];
+    labels.push(file.raceLabel);
+
+    // Zespół pojawia się w historii dopiero od rundy, w której
+    // po raz pierwszy wystąpił w danych.
+    for (const competitor of file.competitors) {
+      if (!competitor.team) continue;
+      const key = normalizeTeam(competitor.team);
+      if (!cumulative.has(key)) {
+        const teamInfo = teams.get(key);
+        cumulative.set(key, {
+          key,
+          name: teamInfo.name,
+          bigPoints: 0,
+          smallPoints: 0
+        });
+        history.get(key).push(...Array(raceIndex).fill(null));
+      }
+    }
+
+    for (const competitor of file.competitors) {
+      if (!competitor.team) continue;
+      const total = cumulative.get(normalizeTeam(competitor.team));
+      total.bigPoints += competitor.bigPoints;
+      total.smallPoints += competitor.small;
+    }
+
+    const ranking = [...cumulative.values()].sort((a, b) =>
+      b.bigPoints - a.bigPoints || b.smallPoints - a.smallPoints
+    );
+
+    let previous = null;
+    let position = 0;
+    ranking.forEach((team, index) => {
+      if (!previous ||
+          team.bigPoints !== previous.bigPoints ||
+          team.smallPoints !== previous.smallPoints) {
+        position = index + 1;
+      }
+      history.get(team.key).push(position);
+      previous = team;
+    });
+  }
+
+  return { labels, teams: history };
+}
+
+function drawSeasonChart() {
+  if (!seasonChartData || typeof Chart === "undefined") return;
+
+  const metric = metricSelect.value;
+  const datasets = [...seasonChartData.teams.values()].map(team => {
+    const colors = getTeamColors(team.name);
+    return {
+      label: team.name,
+      data: team[metric],
+      borderColor: colors?.background ?? "#667085",
+      backgroundColor: colors?.text ?? "#667085",
+      pointBackgroundColor: colors?.text ?? "#667085",
+      borderWidth: 2,
+      pointRadius: 2,
+      pointHoverRadius: 5,
+      tension: 0.15,
+      fill: false
+    };
+  });
+
+  if (seasonChart) seasonChart.destroy();
+
+  seasonChart = new Chart(chartCanvas, {
+    type: "line",
+    data: { labels: seasonChartData.labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: true, position: "bottom" },
+        tooltip: {
+          callbacks: {
+            label: context => `${context.dataset.label}: ${formatNumber(context.parsed.y)}`
+          }
+        }
+      },
+      scales: {
+        x: { title: { display: true, text: "Runda" } },
+        y: {
+          beginAtZero: true,
+          title: {
+            display: true,
+            text: metric === "bigPoints" ? "Duże punkty – suma narastająca" : "Małe punkty – suma narastająca"
+          }
+        }
+      }
+    }
+  });
+}
+
+function appendExpandedRow(team, mainRow) {
+  const row = document.createElement("tr");
+  row.className = "expanded-row";
+  const cell = document.createElement("td");
+  cell.colSpan = 4;
+
+  const grid = document.createElement("div");
+  grid.className = "expanded-grid";
+
+  const chartPanel = document.createElement("section");
+  const chartHeading = document.createElement("h3");
+  chartHeading.textContent = `Historia pozycji — ${team.name}`;
+  const chartWrap = document.createElement("div");
+  chartWrap.className = "position-chart-wrap";
+  const canvas = document.createElement("canvas");
+  chartWrap.appendChild(canvas);
+  chartPanel.append(chartHeading, chartWrap);
+
+  const contributionPanel = document.createElement("section");
+  const contributionHeading = document.createElement("h3");
+  contributionHeading.textContent = `Indywidualny wkład zawodników — ${team.name}`;
+
+  const contributionWrap = document.createElement("div");
+  contributionWrap.className = "table-wrap";
+  const table = document.createElement("table");
+  table.className = "contribution-table";
+  table.innerHTML = `
+    <thead><tr>
+      <th>Zawodnik</th>
+      <th class="num">Duże punkty</th>
+      <th class="num">Małe punkty</th>
+    </tr></thead>
+    <tbody></tbody>`;
+  const tbody = table.querySelector("tbody");
+
+  const drivers = [...team.drivers.values()].sort((a, b) =>
+    b.bigPoints - a.bigPoints ||
+    b.smallPoints - a.smallPoints ||
+    a.nick.localeCompare(b.nick, "pl")
+  );
+
+  for (const driver of drivers) {
+    const tr = document.createElement("tr");
+    const nick = document.createElement("td");
+    nick.textContent = driver.nick;
+    const big = document.createElement("td");
+    big.className = "num";
+    big.textContent = formatNumber(driver.bigPoints);
+    const small = document.createElement("td");
+    small.className = "num";
+    small.textContent = formatNumber(driver.smallPoints);
+    tr.append(nick, big, small);
+    tbody.appendChild(tr);
+  }
+
+  contributionWrap.appendChild(table);
+  contributionPanel.append(contributionHeading, contributionWrap);
+  grid.append(chartPanel, contributionPanel);
+  cell.appendChild(grid);
+  row.appendChild(cell);
+  bodyEl.insertBefore(row, mainRow.nextSibling);
+
+  const positions = positionHistoryData?.teams.get(team.key);
+  if (!positions || typeof Chart === "undefined") {
+    chartHeading.textContent += " — wykres niedostępny";
+    return;
+  }
+
+  const colors = getTeamColors(team.name);
+  positionChart = new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: positionHistoryData.labels,
+      datasets: [{
+        label: "Pozycja w klasyfikacji zespołów",
+        data: positions,
+        borderColor: colors?.background ?? "#2878b5",
+        backgroundColor: colors?.background ?? "#2878b5",
+        borderWidth: 2,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        tension: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: context => `Pozycja: ${context.parsed.y}.` } }
+      },
+      scales: {
+        x: { title: { display: true, text: "Runda" } },
+        y: {
+          reverse: true,
+          min: 1,
+          ticks: { stepSize: 1, precision: 0 },
+          title: { display: true, text: "Miejsce w klasyfikacji" }
+        }
+      }
+    }
+  });
+}
+
+function sortRows(rows) {
+  if (!sortState.key) {
+    return [...rows].sort((a, b) =>
+      b.bigPoints - a.bigPoints || b.smallPoints - a.smallPoints ||
+      a.name.localeCompare(b.name, "pl")
+    );
+  }
+
+  return [...rows].sort((a, b) => {
+    let comparison;
+    if (sortState.key === "name") {
+      comparison = a.name.localeCompare(b.name, "pl", { sensitivity: "base" });
+    } else {
+      comparison = a[sortState.key] - b[sortState.key];
+    }
+    return comparison === 0
+      ? (b.bigPoints - a.bigPoints || b.smallPoints - a.smallPoints)
+      : comparison * sortState.direction;
+  });
+}
+
+function updateSortIndicators() {
+  document.querySelectorAll("th[data-sort]").forEach(th => {
+    const key = th.dataset.sort;
+    const indicator = th.querySelector(".sort-indicator");
+    th.classList.toggle("active-sort", key === sortState.key);
+    indicator.textContent = key !== sortState.key
+      ? ""
+      : (sortState.direction === 1 ? "▲" : "▼");
+  });
+}
+
+document.querySelector("thead").addEventListener("click", event => {
+  const th = event.target.closest("th[data-sort]");
+  if (!th) return;
+  const key = th.dataset.sort;
+  if (sortState.key === key) {
+    sortState.direction *= -1;
+  } else {
+    sortState.key = key;
+    sortState.direction = 1;
+  }
+  render(teamTotals);
+});
+
+function render(teams) {
+  if (positionChart) {
+    positionChart.destroy();
+    positionChart = null;
+  }
+
+  const generalRows = [...teams.values()].sort((a, b) =>
+    b.bigPoints - a.bigPoints || b.smallPoints - a.smallPoints ||
+    a.name.localeCompare(b.name, "pl")
+  );
+
+  let previous = null;
+  let position = 0;
+  generalRows.forEach((team, index) => {
+    if (!previous ||
+        team.bigPoints !== previous.bigPoints ||
+        team.smallPoints !== previous.smallPoints) {
+      position = index + 1;
+    }
+    team.generalPosition = position;
+    previous = team;
+  });
+
+  if (expandedTeamKey !== null && !teams.has(expandedTeamKey)) {
+    expandedTeamKey = null;
+  }
+
+  bodyEl.replaceChildren();
+  for (const team of sortRows(generalRows)) {
+    const tr = document.createElement("tr");
+    const teamColors = getTeamColors(team.name);
+    if (teamColors) {
+      tr.style.backgroundColor = teamColors.background;
+      tr.style.color = teamColors.text;
+    }
+
+    const positionTd = document.createElement("td");
+    positionTd.className = "num";
+    positionTd.textContent = team.generalPosition;
+
+    const nameTd = document.createElement("td");
+    const nameButton = document.createElement("button");
+    nameButton.type = "button";
+    nameButton.className = "team-button";
+    nameButton.textContent = team.name;
+    nameButton.setAttribute("aria-expanded", String(expandedTeamKey === team.key));
+    nameButton.addEventListener("click", () => {
+      expandedTeamKey = expandedTeamKey === team.key ? null : team.key;
+      render(teamTotals);
+    });
+    nameTd.appendChild(nameButton);
+
+    const bigTd = document.createElement("td");
+    bigTd.className = "num";
+    bigTd.textContent = formatNumber(team.bigPoints);
+
+    const smallTd = document.createElement("td");
+    smallTd.className = "num";
+    smallTd.textContent = formatNumber(team.smallPoints);
+
+    tr.append(positionTd, nameTd, bigTd, smallTd);
+    bodyEl.appendChild(tr);
+
+    if (expandedTeamKey === team.key) appendExpandedRow(team, tr);
+  }
+
+  if (!generalRows.length) {
+    bodyEl.innerHTML = '<tr><td colspan="4">Brak wyników do wyświetlenia.</td></tr>';
+  }
+  updateSortIndicators();
+}
+
+async function loadTeamClassification() {
+  reloadButton.disabled = true;
+  statusEl.className = "";
+  statusEl.textContent = "Pobieranie plików CSV…";
+  bodyEl.innerHTML = '<tr><td colspan="4">Wczytywanie danych…</td></tr>';
+
+  try {
+    const [files, pointsTable] = await Promise.all([listTyperFiles(), loadPoints()]);
+    if (!files.length) throw new Error("Nie znaleziono żadnych plików CSV w folderze typerów.");
+
+    files.sort((a, b) =>
+      parseRaceFileName(a.name).raceNumber - parseRaceFileName(b.name).raceNumber
+    );
+
+    for (let i = 1; i < files.length; i++) {
+      const previous = parseRaceFileName(files[i - 1].name);
+      const current = parseRaceFileName(files[i].name);
+      if (previous.raceNumber === current.raceNumber) {
+        throw new Error(`Dwa pliki mają ten sam numer wyścigu: ${previous.raceNumber}.`);
+      }
+    }
+
+    const allFiles = [];
+    for (const file of files) {
+      const rows = parseCSV(await fetchText(file.download_url));
+      allFiles.push(prepareOneFile(rows, file.name, pointsTable));
+    }
+
+    teamTotals = createTeamTotals(allFiles);
+    seasonChartData = buildSeasonChartData(allFiles, teamTotals);
+    positionHistoryData = buildPositionHistory(allFiles, teamTotals);
+    render(teamTotals);
+
+    if (typeof Chart !== "undefined") {
+      drawSeasonChart();
+      statusEl.textContent = `Wczytano ${allFiles.length} plików; sklasyfikowano ${teamTotals.size} zespołów.`;
+    } else {
+      statusEl.textContent = `Wczytano ${allFiles.length} plików; sklasyfikowano ${teamTotals.size} zespołów. Wykres niedostępny.`;
+    }
+  } catch (error) {
+    console.error(error);
+    statusEl.className = "error";
+    statusEl.textContent = error.message || "Wystąpił błąd podczas wczytywania klasyfikacji.";
+    bodyEl.innerHTML = '<tr><td colspan="4">Nie udało się wczytać klasyfikacji. Szczegóły znajdują się powyżej.</td></tr>';
+  } finally {
+    reloadButton.disabled = false;
+  }
+}
+
+metricSelect.addEventListener("change", drawSeasonChart);
+reloadButton.addEventListener("click", loadTeamClassification);
+loadTeamClassification();
+</script>
+</body>
+</html>
